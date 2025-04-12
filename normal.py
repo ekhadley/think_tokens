@@ -81,7 +81,8 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 
     sample_completion = model.yap("George Washington was")
     print(yellow, sample_completion, endc)
-    wandb.log({"yap": sample_completion})
+    table = wandb.Table(data=[[sample_completion]], columns=['completion'])
+    wandb.log({"sample_completion": table})
 
     dl = t.utils.data.DataLoader(dataset, batch_size=cfg.batch_size)
     for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
@@ -98,19 +99,20 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
         if i%1000 == 0:
             sample_completion = model.yap("George Washington was")
             print(yellow, sample_completion, endc)
-            wandb.log({"yap": sample_completion})
+            table = wandb.Table(data=[[sample_completion]], columns=['completion'])
+            wandb.log({"sample_completion": table})
 
             t.save(model.state_dict(), f"{save_dir}/save_{i}.pth")
 
 if __name__ == "__main__":
-    model_cfg = ModelConfig(d_model=512, d_mlp=2048, d_head=64, n_heads=8, n_layers=6, d_vocab=50257 + 1)
+    model_cfg = ModelConfig(d_model=512, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257 + 1)
     model = GPT2(model_cfg)
 
     training_cfg = TrainingConfig(batch_size=16, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
-    #dataset = datasets.load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train").train_test_split(0.03)['test']
+    #dataset = datasets.load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train").train_test_split(0.07)['test']
     #dataset = dataset.map(lambda x: model.tokenizer(x['text'], padding='max_length', truncation=True, max_length=training_cfg.seq_len))
-    #dataset.save_to_disk(f"fineweb-edu-tokenized-300M")
-    dataset = datasets.load_from_disk(f"fineweb-edu-tokenized-300M")
+    #dataset.save_to_disk(f"fineweb-edu-tokenized-600M")
+    dataset = datasets.load_from_disk(f"fineweb-edu-tokenized-600M")
 
     dataset.set_format(type='torch')
     train(model, training_cfg, dataset, "./saves")
