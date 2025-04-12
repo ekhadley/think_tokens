@@ -1,4 +1,5 @@
 __pycache__
 saves
-fineweb-edu-tokenized-300
+fineweb-edu-tokenized*
 Pipfile
+wandb
