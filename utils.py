@@ -38,6 +38,27 @@ class ModelConfig:
         self.d_head = d_head
         self.d_vocab = d_vocab
 
+class ThinkingModelConfig:
+    def __init__(
+            self,
+            d_model:int = 512,
+            d_mlp:int = 2048,
+            d_head:int = 64,
+            n_heads:int = 8,
+            n_layers:int = 6,
+            d_normal_vocab:int = 50257,
+            d_thought_vocab:int = 50257,
+        ):
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.d_mlp = d_mlp
+        self.d_head = d_head
+        self.d_normal_vocab = d_normal_vocab
+        self.d_thought_vocab = d_thought_vocab
+        self.d_vocab_total = d_normal_vocab + d_thought_vocab
+
+
 
 class TrainingConfig:
     def __init__(
