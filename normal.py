@@ -3,14 +3,11 @@ from torch import nn
 from torch.nn import functional as F
 from transformers import GPT2TokenizerFast
 import wandb
-import huggingface_hub
 import tqdm
 import datasets
 
 from utils import *
 
-t.backends.cuda.enable_flash_sdp(enabled=True)
-t.set_default_device(t.device("cuda"))
 
 
 class TransformerBlock(nn.Module):
@@ -70,6 +67,8 @@ class GPT2(nn.Module):
                 tokens = t.cat([tokens, next_token], dim=-1)
         return "".join(self.tokenizer.batch_decode(tokens))
 
+t.backends.cuda.enable_flash_sdp(enabled=True)
+t.set_default_device(t.device("cuda"))
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
