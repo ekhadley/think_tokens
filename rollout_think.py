@@ -68,10 +68,26 @@ class GPT2Thinking(nn.Module):
     def printSeq(self, seq: t.Tensor) -> None:
         print(self.seqStr(seq))
 
+def apply_repetition_penalty_batch(logits: t.Tensor, generated: list[list[int]], penalty: float):
+    B = logits.shape[0]
+    device = logits.device
+    indices = t.arange(logits.shape[1], device=device)
+    for b in range(B):
+        token_ids = t.tensor(list(set(generated[b])), device=device)
+        logits_b = logits[b, indices, token_ids]
+
+        # Apply penalty to just the selected tokens
+        logits[b, indices, token_ids] = t.where(
+            logits_b > 0,
+            logits_b / penalty,
+            logits_b * penalty
+        )
+    return logits
+
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
-t.autocast(device_type="cuda", enabled=True, dtype=t.bfloat16)
+t.autocast(device_type="cuda", enabled=True, dtype=t.float16)
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
@@ -79,7 +95,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 
     model.train()
 
-    wandb.init(project="thoughtful", name="gpt2s_think", config=cfg)
+    wandb.init(project="thoughtful", name="gpt2s_think_rep_pen", config=cfg)
     wandb.watch(model, log="all")
     completions_table = wandb.Table(columns=['completion'])
     #wandb.log({"sample_completions": completions_table})
@@ -101,19 +117,21 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
             model.eval()
             #seq = batch['input_ids'].repeat(cfg.batch_size, 1)
             seq = batch['input_ids']
-
-            for i in range(training_cfg.seq_len):
+            
+            repetition_penalty = 1.2
+            for i in range(training_cfg.seq_len): # inference out next tokens
                 logits = model(seq)
                 next_token = sampleLogits(logits[:, -1, :])
                 seq = t.cat([seq, next_token], dim=-1)
 
-            real_toks_mask = seq < model.cfg.d_normal_vocab
-            masked_toks = seq * real_toks_mask
-            ref_logits = ref(masked_toks, attention_mask=real_toks_mask).logits
-            rewards: t.Tensor = eindex(ref_logits[:, training_cfg.seq_len-1:-1, :], masked_toks[:, training_cfg.seq_len:], "batch seq [batch seq]") * real_toks_mask[:, training_cfg.seq_len-1:-1]
+            real_toks_mask = seq < model.cfg.d_normal_vocab # mask out thought tokens
+            masked_toks = seq * real_toks_mask # mask out thought tokens
+            ref_logits = ref(masked_toks, attention_mask=real_toks_mask).logits # get logits from reference model. this tells us house likely* the learning model's outputs were
+            #ref_logits = apply_repetition_penalty_batch(ref_logits, masked_toks, repetition_penalty) # apply repetition penalty to reference model logits
+            rewards: t.Tensor = eindex(ref_logits[:, training_cfg.seq_len-1:-1, :], masked_toks[:, training_cfg.seq_len:], "batch seq [batch seq]") * real_toks_mask[:, training_cfg.seq_len-1:-1] # rewards are the logits of the reference model for the tokens we generated
             reward_mean, reward_std = rewards.mean(), rewards.var()
-            normalized_rewards = (rewards - reward_mean) / (reward_std + 1e-8)
-            discounted_rewards = (normalized_rewards.unsqueeze(1) * discounts.unsqueeze(0)).sum(-1)
+            normalized_rewards = (rewards - reward_mean) / (reward_std + 1e-8) # normalize rewards
+            discounted_rewards = (normalized_rewards.unsqueeze(1) * discounts.unsqueeze(0)).sum(-1) # discounted rtg
 
             if b%100 == 0:
                 completions_table.add_data(model.tokenizer.decode(seq[0]))
@@ -150,21 +168,3 @@ if __name__ == "__main__":
     dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-think-128-600M")
 
     train(model, training_cfg, dataset, "./saves")
-    
-    with t.no_grad():
-        ref = loadReferenceModel("openai-community/gpt2-xl")
-        print(vars(model))
-        ref_tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2-xl")
-        seq = dataset[0]['input_ids'][0:-20].unsqueeze(0)
-        print(blue, seq, endc)
-        str_toks = model.tokenizer.decode(seq.squeeze())
-        print(red, str_toks, endc)
-        toks = t.tensor(ref_tokenizer(str_toks)['input_ids']).unsqueeze(0)
-        print(purple, toks, endc)
-        with t.no_grad():
-            for _ in range(50):
-                logits = ref(toks).logits.squeeze()
-                next_token = sampleLogits(logits[-1])
-                toks = t.cat([toks, next_token.unsqueeze(0)], dim=-1)
-        out = "".join(ref_tokenizer.batch_decode(toks))
-        print(green, out, endc)

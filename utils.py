@@ -89,26 +89,10 @@ class TrainingConfig:
         self.gamma = gamma
 
 def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
-    """
-    Sample from the logits of a model.
-    Args:
-        logits: The logits to sample from.
-        temperature: The temperature to use for sampling.
-        top_k: The number of top logits to keep.
-        top_p: The cumulative probability to use for sampling.
-    Returns:
-        The sampled token.
-    logits shape: (batch_size, sequence_length, vocab_size)
-    """
-    # Apply temperature
     logits = logits.squeeze() / temperature
-
-    # Apply top-k
     if top_k > 0:
         indices_to_remove = logits < t.topk(logits, top_k)[0][..., -1, None]
         logits[indices_to_remove] = -float('Inf')
-
-    # Apply top-p
     if 0 < top_p < 1:
         sorted_logits, sorted_indices = t.sort(logits, descending=True)
         cumulative_probs = t.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -117,8 +101,6 @@ def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top
         sorted_indices_to_remove[..., 0] = 0
         indices_to_remove = sorted_indices[sorted_indices_to_remove]
         logits[indices_to_remove] = -float('Inf')
-
-    # Sample from the distribution
     probs = F.softmax(logits, dim=-1)
     return t.multinomial(probs, num_samples=1)
 
