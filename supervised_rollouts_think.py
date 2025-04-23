@@ -7,6 +7,7 @@ from torch.nn import functional as F
 import transformers as tf
 from transformers import GPT2TokenizerFast, AutoTokenizer
 import einops
+import random
 from eindex import eindex
 
 from utils import *
@@ -66,14 +67,14 @@ class GPT2Thinking(nn.Module):
                 out += f"{cyan}<think{token.item() - self.cfg.d_normal_vocab}>{endc}"
         return out
     def printSeq(self, seq: t.Tensor) -> None:
-        print(self.seqStr(seq))
+        print("\n", self.seqStr(seq))
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
 t.autocast(device_type="cuda", enabled=True, dtype=t.bfloat16)
 
-def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
-    optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
+def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
+    optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
     sample_completion_prompt = "George Washington was"
 
     model.train()
@@ -82,62 +83,54 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     wandb.watch(model, log="all")
     completions_table = wandb.Table(columns=['completion'])
     #wandb.log({"sample_completions": completions_table})
-
-    discounts = t.zeros((cfg.seq_len, cfg.seq_len))
-    for i in range(cfg.seq_len):
-        for j in range(i, cfg.seq_len):
-            discounts[i, j] = cfg.gamma ** (j - i)
     
+    _ctx = t.full((cfg.seq_len, cfg.seq_len), 50256, dtype=t.int32) # the context sequence
+    _end_indices = t.arange(cfg.seq_len, dtype=t.int32) # the start indices for the rollouts
+    seq_indices = t.arange(cfg.seq_len, dtype=t.int32) # the indices of the sequence
+
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
     #dl = t.utils.data.DataLoader(dataset, batch_size=16)
     for b, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
         with t.inference_mode():
             model.eval()
-            #seq = batch['input_ids'].repeat(cfg.batch_size, 1)
             full_seq = batch['input_ids'] # the full token sequence
-            # each row here will represent a real token prediction.
-            # it will consist of [some number of dataset tokens] + [some number of thinking tokens] + a single predicted real token
-            ctx = t.zeros((cfg.seq_len, cfg.seq_len), dtype=t.int16) # the context sequence
-            
-            # this approach works by rolling out a single chain of thought until a token prediction is made. We store the context sequence (of entirely real tokesn), the cot, and the prediction in a big batch and run them all through later.
-            # we will start with a single empty sequence
-            # we autoregressively output tokens to the end of this sequence
-            # continue as long as the token outputted is a thinking type token
-            # stop when we predict a real token
-            # this contet+rollout gets saved to ctx
-            print(red, full_seq.shape, ctx.shape, endc)
-            exit()
-            for i in range(training_cfg.seq_len): # iterates over all the rollouts for the sequence (same as number of tokens in the sequence)
-                tail_idx = i
-                seq = full_seq[]
+            ctx = _ctx.clone()            
+            end_indices = _end_indices.clone()
+            for i in range(1, training_cfg.seq_len): # iterates over all the rollouts of the sequence. i is the number of real tokens in the context when the rollout starts
+                seq = full_seq.clone().squeeze()
+                seq[i:] = 50256
 
+                for s in range(training_cfg.seq_len - i): # s is basically the number of thinking tokens currently in the rollout
+                    logits = model(seq)[:, i + s - 1]
+                    next_token = sampleLogits(logits, temperature=0.9) # sampling provides exploration
+                    if random.random() > 0.1: # introduce more thinking tokens for testing
+                        next_token = random.randint(model.cfg.d_normal_vocab + 1, model.cfg.d_vocab_total - 1) # random exploration
+                    seq[i + s] = next_token  # put our output in the sequence.
+                    if next_token <= model.cfg.d_normal_vocab: # if the next token is a normal token
+                        break
+                    end_indices[i] += 1
+                ctx[i] = seq # save the context sequence
 
+        ctx = ctx.clone()
+        full_seq = full_seq.clone()
 
-
-            if b%100 == 0:
-                completions_table.add_data(model.tokenizer.decode(seq[0]))
-                wandb.log({"sample_completions": completions_table})
-                model.printSeq(seq[0])
-                t.save(model.state_dict(), f"{save_dir}/think_save_{i}.pth")
-
-        seq = seq.clone()
-        discounted_rewards = discounted_rewards.clone()
-
-        model.train()
-        logits = model(seq)
-        seq_logits: t.Tensor = eindex(logits[:, training_cfg.seq_len-1:-1, :], seq[:, training_cfg.seq_len:], "batch seq [batch seq]")
-        weighted_logits = seq_logits * -discounted_rewards # high ref logit is good. want to maximize via gradient DEscent so minus
-        loss = weighted_logits.mean()
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-        #wandb.log({"reward_mean": reward_mean})
-        #wandb.log({"reward_std": reward_std})
-        #wandb.log({"weighted_token_logits": loss.detach().item()})
-        #tr.set_description(f"{blue}reward_mean: {reward_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}")
-
-
+        z = 30
+        model.printSeq(ctx[z])
+        logits = model(ctx)
+        print(magenta, end_indices, endc)
+        print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {(rt:=ctx[z, end_indices[z]])}('{model.tokenizer.decode(rt.detach().item())}'), real next tok: {(rnt:=seq[z])}('{model.tokenizer.decode(rnt.detach().item())}'), logit on real next tok: {logits[z, end_indices[z], ctx[z, end_indices[z]]]}{endc}")
+        pred_logits = logits[seq_indices, end_indices - 1, seq[seq_indices]] # the logit on the correct token for the last token in the rollout (the real token prediction)
+        rewards = (pred_logits - pred_logits.mean()) / pred_logits.std() # the reward is the normalized logit on the correct token
+        think_mask = ctx > model.cfg.d_normal_vocab
+        
+        ctx_map = t.zeros_like(ctx)
+        ctx_map[think_mask] = 1
+        ctx_map[ctx < 50256] = -1
+        ctx_map[ctx == 50256] = 0
+        imshow(rewards.unsqueeze(0))
+        imshow(ctx_map)
+        exit()
+        
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)

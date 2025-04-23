@@ -90,7 +90,7 @@ t.set_default_device(t.device("cuda"))
 t.autocast(device_type="cuda", enabled=True, dtype=t.float16)
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
-    optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
+    optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
     sample_completion_prompt = "George Washington was"
 
     model.train()
@@ -145,7 +145,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
         model.train()
         logits = model(seq)
         seq_logits: t.Tensor = eindex(logits[:, training_cfg.seq_len-1:-1, :], seq[:, training_cfg.seq_len:], "batch seq [batch seq]")
-        weighted_logits = seq_logits * -discounted_rewards # high ref logit is good. want to maximize via gradient DEscent so minus
+        weighted_logits = seq_logits * discounted_rewards # higher reward is good. higher logit means higher probability. want prob to go up for positive reward actions
         loss = weighted_logits.mean()
         loss.backward()
         optimizer.step()
