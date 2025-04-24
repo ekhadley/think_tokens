@@ -34,7 +34,7 @@ class GPT2Thinking(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
-        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total - 1, bias=False)
+        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total - 1, bias=False) # -1 because we don't want to predict <pad>
 
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
     def encode(self, text):
@@ -137,7 +137,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
                 completions_table.add_data(model.tokenizer.decode(seq[0]))
                 wandb.log({"sample_completions": completions_table})
                 model.printSeq(seq[0])
-                t.save(model.state_dict(), f"{save_dir}/think_save_{i}.pth")
+                t.save(model.state_dict(), f"{save_dir}/think_save_{b}.pth")
 
         seq = seq.clone()
         discounted_rewards = discounted_rewards.clone()
@@ -146,7 +146,9 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
         logits = model(seq)
         seq_logits: t.Tensor = eindex(logits[:, training_cfg.seq_len-1:-1, :], seq[:, training_cfg.seq_len:], "batch seq [batch seq]")
         weighted_logits = seq_logits * discounted_rewards # higher reward is good. higher logit means higher probability. want prob to go up for positive reward actions
-        loss = weighted_logits.mean()
+        entropy_weight = 0.01
+        entropy = -(logits.softmax(dim=-1) * logits.log_softmax(dim=-1)).sum(-1).mean()
+        loss = weighted_logits.mean() + entropy_weight * entropy # maximize the weighted logits and minimize the entropy
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
