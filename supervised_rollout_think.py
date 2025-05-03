@@ -36,6 +36,7 @@ class GPT2Thinking(nn.Module):
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total - 1, bias=False)
+        self.eot = 50256
 
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
     def encode(self, text):
@@ -84,49 +85,65 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
     completions_table = wandb.Table(columns=['completion'])
     #wandb.log({"sample_completions": completions_table})
     
-    _ctx = t.full((cfg.seq_len, cfg.seq_len), 50256, dtype=t.int32) # the context sequence
-    _end_indices = t.arange(cfg.seq_len, dtype=t.int32) # the start indices for the rollouts
-    seq_indices = t.arange(cfg.seq_len, dtype=t.int32) # the indices of the sequence
+    ctx = t.full((cfg.seq_len - 1, cfg.seq_len), model.eot, dtype=t.int32)
+    seq_indices = t.arange(cfg.seq_len, dtype=t.int32)
+    
+    z = 3
 
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
     #dl = t.utils.data.DataLoader(dataset, batch_size=16)
     for b, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
         with t.inference_mode():
             model.eval()
-            full_seq = batch['input_ids'] # the full token sequence
-            ctx = _ctx.clone()            
-            end_indices = _end_indices.clone()
-            for i in range(1, training_cfg.seq_len): # iterates over all the rollouts of the sequence. i is the number of real tokens in the context when the rollout starts
+            full_seq = batch['input_ids']
+            end_indices = t.arange(cfg.seq_len - 1, dtype=t.int32)
+            for i in range(training_cfg.seq_len - 1): 
                 seq = full_seq.clone().squeeze()
-                seq[i:] = 50256
+                seq[i+1:] = model.eot
 
-                for s in range(training_cfg.seq_len - i): # s is basically the number of thinking tokens currently in the rollout
-                    logits = model(seq)[:, i + s - 1]
-                    next_token = sampleLogits(logits, temperature=0.9) # sampling provides exploration
-                    if random.random() > 0.1: # introduce more thinking tokens for testing
-                        next_token = random.randint(model.cfg.d_normal_vocab + 1, model.cfg.d_vocab_total - 1) # random exploration
-                    seq[i + s] = next_token  # put our output in the sequence.
-                    if next_token <= model.cfg.d_normal_vocab: # if the next token is a normal token
+                for s in range(training_cfg.seq_len - i - 1):
+                    logits: t.Tensor = model(seq[:end_indices[i] + 1])
+                    #next_token = sampleLogits(logits[-1], temperature=0.9)
+                    next_token = logits[-1].argmax(-1)
+                    #print(magenta, logits.shape, logits[s + i - 1].shape, endc)
+                    if random.random() > 0.1: next_token = random.randint(model.cfg.d_normal_vocab + 1, model.cfg.d_vocab_total - 1)
+                    seq[i + s + 1] = next_token
+                    end_indices[i] = i + s + 1
+                    if i == z:
+                        print(cyan, end_indices[z], endc)
+                        print(lime, seq[:end_indices[i] + 1], endc)
+                        print(magenta, logits.shape, endc)
+                        print(magenta, logits[-1].argmax(-1), endc)
+                        print(magenta, logits[-1].max(), endc)
+                        print(lime, seq[:end_indices[i] + 1], endc)
+                        print(next_token)
+                    if next_token <= model.cfg.d_normal_vocab:
                         break
-                    end_indices[i] += 1
                 ctx[i] = seq # save the context sequence
 
-        ctx = ctx.clone()
-        full_seq = full_seq.clone()
+        ctx_g = ctx.clone()
 
-        z = 30
         model.printSeq(ctx[z])
-        logits = model(ctx)
-        print(magenta, end_indices, endc)
-        print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {(rt:=ctx[z, end_indices[z]])}('{model.tokenizer.decode(rt.detach().item())}'), real next tok: {(rnt:=seq[z])}('{model.tokenizer.decode(rnt.detach().item())}'), logit on real next tok: {logits[z, end_indices[z], ctx[z, end_indices[z]]]}{endc}")
-        pred_logits = logits[seq_indices, end_indices - 1, seq[seq_indices]] # the logit on the correct token for the last token in the rollout (the real token prediction)
+        logits = model(ctx_g)
+
+
+        pred_nt = ctx[z, end_indices[z]].detach().item()
+        real_nt = seq[z + 1].detach().item()
+        pred_logits = logits[z, end_indices[z] - 1]
+        print(red, pred_logits.max(), pred_logits.argmax(), endc)
+        print(magenta, ctx[z, end_indices[z]], endc)
+        print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {(rnt:=seq[z+1])}('{model.tokenizer.decode(rnt.detach().item())}'), logit on real next tok: {logits[z, end_indices[z]+1, seq[z+1]]}{endc}")
+
+
+        pred_logits = logits[seq_indices[:-1], end_indices - 1, seq[seq_indices[:-1]]] # the logit on the correct token for the last token in the rollout (the real token prediction)
+        print(orange, pred_logits, endc)
         rewards = (pred_logits - pred_logits.mean()) / pred_logits.std() # the reward is the normalized logit on the correct token
-        think_mask = ctx > model.cfg.d_normal_vocab
+        think_mask = ctx_g > model.cfg.d_normal_vocab
         
         ctx_map = t.zeros_like(ctx)
         ctx_map[think_mask] = 1
-        ctx_map[ctx < 50256] = -1
-        ctx_map[ctx == 50256] = 0
+        ctx_map[ctx < model.eot] = -1
+        ctx_map[ctx == model.eot] = 0
         imshow(rewards.unsqueeze(0))
         imshow(ctx_map)
         exit()

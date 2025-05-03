@@ -25,7 +25,6 @@ underline = '\033[4m'
 endc = '\033[0m'
 
 
-
 class ModelConfig:
     def __init__(
             self,
