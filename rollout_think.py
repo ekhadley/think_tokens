@@ -6,7 +6,6 @@ from torch import nn
 from torch.nn import functional as F
 import transformers as tf
 from transformers import GPT2TokenizerFast, AutoTokenizer
-import einops
 from eindex import eindex
 
 from utils import *
@@ -14,16 +13,20 @@ from utils import *
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(TransformerBlock, self).__init__()
-        self.linear1 = nn.Linear(cfg.d_model, cfg.d_mlp)
-        self.linear2 = nn.Linear(cfg.d_mlp, cfg.d_model)
-        self.attn = nn.MultiheadAttention(cfg.d_model, cfg.n_heads)
+        self.attn = nn.MultiheadAttention(cfg.d_model, cfg.n_heads, batch_first=True)
         self.norm1 = nn.LayerNorm(cfg.d_model)
+        self.linear1 = nn.Linear(cfg.d_model, cfg.d_mlp)
+        self.act = nn.ReLU()
+        self.linear2 = nn.Linear(cfg.d_mlp, cfg.d_model)
         self.norm2 = nn.LayerNorm(cfg.d_model)
     
     def forward(self, x: t.Tensor) -> t.Tensor:
-        attn_output, _ = self.attn(x, x, x)
+        if x.ndim == 2: x = x.unsqueeze(0)
+        seq_len = x.shape[1]
+        attn_mask = t.triu(t.ones((seq_len, seq_len)), diagonal=1).bool()
+        attn_output, _ = self.attn(x, x, x, is_causal=True, attn_mask=attn_mask)
         x = self.norm1(x + attn_output)
-        ff_output = self.linear2(F.relu(self.linear1(x)))
+        ff_output = self.linear2(self.act(self.linear1(x)))
         x = self.norm2(x + ff_output)
         return x
 
@@ -83,7 +86,6 @@ def apply_repetition_penalty_batch(logits: t.Tensor, generated: list[list[int]],
             logits_b * penalty
         )
     return logits
-
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
@@ -146,27 +148,31 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
         logits = model(seq)
         seq_logits: t.Tensor = eindex(logits[:, training_cfg.seq_len-1:-1, :], seq[:, training_cfg.seq_len:], "batch seq [batch seq]")
         weighted_logits = seq_logits * discounted_rewards # higher reward is good. higher logit means higher probability. want prob to go up for positive reward actions
-        entropy_weight = 0.01
+        
+        entropy_weight = 0.2
         entropy = -(logits.softmax(dim=-1) * logits.log_softmax(dim=-1)).sum(-1).mean()
-        loss = weighted_logits.mean() + entropy_weight * entropy # maximize the weighted logits and minimize the entropy
+        entropy_loss = entropy_weight * entropy
+        loss = weighted_logits.mean() + entropy_loss # maximize the logit and minimize the entropy
+        
+        #loss = weighted_logits.mean()
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
+        wandb.log({"entropy_loss": entropy_loss})
         wandb.log({"reward_mean": reward_mean})
         wandb.log({"reward_std": reward_std})
+        wandb.log({"num_think_toks": (~real_toks_mask).count_nonzero()})
         wandb.log({"weighted_token_logits": loss.detach().item()})
-        tr.set_description(f"{blue}reward_mean: {reward_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}")
-
-
+        tr.set_description(f"{magenta}reward_mean: {reward_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}")
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
-    training_cfg = TrainingConfig(seq_len=128, gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(seq_len=256, gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, training_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-think-128-600M", 0.07, pad=False)
     #dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-think-256-600M")
-    dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-think-128-600M")
+    dataset = loadTokenizedDataset(f"datasets/fineweb-edu-tokenized-128")
 
     train(model, training_cfg, dataset, "./saves")

@@ -29,6 +29,7 @@ class ModelConfig:
     def __init__(
             self,
             d_model:int = 512,
+            seq_len:int = 512,
             d_mlp:int = 2048,
             d_head:int = 64,
             n_heads:int = 8,
@@ -41,6 +42,7 @@ class ModelConfig:
         self.d_mlp = d_mlp
         self.d_head = d_head
         self.d_vocab = d_vocab
+        self.seq_len = seq_len
 
 class ThinkingModelConfig:
     def __init__(
@@ -62,15 +64,12 @@ class ThinkingModelConfig:
         self.d_thought_vocab = d_thought_vocab
         self.d_vocab_total = d_normal_vocab + d_thought_vocab
 
-
-
 class TrainingConfig:
     def __init__(
             self,
             batch_size:int = 32,
             lr:float = 3e-4,
             epochs:int = 1,
-            seq_len:int = 512,
             warmup_steps:int = 1000,
             weight_decay:float = 1e-1,
             adam_beta1:float = 0.9,
@@ -80,12 +79,12 @@ class TrainingConfig:
         self.batch_size = batch_size
         self.lr = lr
         self.epochs = epochs
-        self.seq_len = seq_len
         self.warmup_steps = warmup_steps
         self.weight_decay = weight_decay
         self.adam_beta1 = adam_beta1
         self.adam_beta2 = adam_beta2
         self.gamma = gamma
+
 
 def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
     logits = logits.squeeze() / temperature

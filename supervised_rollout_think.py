@@ -12,19 +12,24 @@ from eindex import eindex
 
 from utils import *
 
+
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(TransformerBlock, self).__init__()
-        self.linear1 = nn.Linear(cfg.d_model, cfg.d_mlp)
-        self.linear2 = nn.Linear(cfg.d_mlp, cfg.d_model)
-        self.attn = nn.MultiheadAttention(cfg.d_model, cfg.n_heads)
+        self.attn = nn.MultiheadAttention(cfg.d_model, cfg.n_heads, batch_first=True)
         self.norm1 = nn.LayerNorm(cfg.d_model)
+        self.linear1 = nn.Linear(cfg.d_model, cfg.d_mlp)
+        self.act = nn.ReLU()
+        self.linear2 = nn.Linear(cfg.d_mlp, cfg.d_model)
         self.norm2 = nn.LayerNorm(cfg.d_model)
     
     def forward(self, x: t.Tensor) -> t.Tensor:
-        attn_output, _ = self.attn(x, x, x)
+        if x.ndim == 2: x = x.unsqueeze(0)
+        seq_len = x.shape[1]
+        attn_mask = t.triu(t.ones((seq_len, seq_len)), diagonal=1).bool()
+        attn_output, _ = self.attn(x, x, x, is_causal=True, attn_mask=attn_mask)
         x = self.norm1(x + attn_output)
-        ff_output = self.linear2(F.relu(self.linear1(x)))
+        ff_output = self.linear2(self.act(self.linear1(x)))
         x = self.norm2(x + ff_output)
         return x
 
@@ -85,10 +90,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
     completions_table = wandb.Table(columns=['completion'])
     #wandb.log({"sample_completions": completions_table})
     
-    ctx = t.full((cfg.seq_len - 1, cfg.seq_len), model.eot, dtype=t.int32)
-    seq_indices = t.arange(cfg.seq_len, dtype=t.int32)
-    
-    z = 3
+    seq_indices = t.arange(cfg.seq_len, dtype=t.int32, requires_grad=False)
 
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
     #dl = t.utils.data.DataLoader(dataset, batch_size=16)
@@ -96,55 +98,54 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         with t.inference_mode():
             model.eval()
             full_seq = batch['input_ids']
+            ctx = t.full((cfg.seq_len - 1, cfg.seq_len), model.eot, dtype=t.int32)
             end_indices = t.arange(cfg.seq_len - 1, dtype=t.int32)
             for i in range(training_cfg.seq_len - 1): 
                 seq = full_seq.clone().squeeze()
                 seq[i+1:] = model.eot
-
                 for s in range(training_cfg.seq_len - i - 1):
-                    logits: t.Tensor = model(seq[:end_indices[i] + 1])
-                    #next_token = sampleLogits(logits[-1], temperature=0.9)
+                    logits: t.Tensor = model(seq[:end_indices[i] + 1]).squeeze()
                     next_token = logits[-1].argmax(-1)
-                    #print(magenta, logits.shape, logits[s + i - 1].shape, endc)
                     if random.random() > 0.1: next_token = random.randint(model.cfg.d_normal_vocab + 1, model.cfg.d_vocab_total - 1)
                     seq[i + s + 1] = next_token
                     end_indices[i] = i + s + 1
-                    if i == z:
-                        print(cyan, end_indices[z], endc)
-                        print(lime, seq[:end_indices[i] + 1], endc)
-                        print(magenta, logits.shape, endc)
-                        print(magenta, logits[-1].argmax(-1), endc)
-                        print(magenta, logits[-1].max(), endc)
-                        print(lime, seq[:end_indices[i] + 1], endc)
-                        print(next_token)
                     if next_token <= model.cfg.d_normal_vocab:
                         break
                 ctx[i] = seq # save the context sequence
 
         ctx_g = ctx.clone()
-
-        model.printSeq(ctx[z])
         logits = model(ctx_g)
 
+        #last_tt = ctx[z, end_indices[z] - 1].detach().item()
+        #print(purple, f"{last_tt=}", endc)
+        #pred_nt = ctx[z, end_indices[z]].detach().item()
+        #real_nt = seq[z + 1].detach().item()
+        #pred_logits = logits[z, end_indices[z] - 1]
+        #print(yellow, f"{logits.shape=}, {end_indices[z]=}, {seq.shape=}", endc)
+        #print(pink, f"{end_indices[z-2:z+2]}", endc)
+        #print(red, f"{pred_logits.max()=}, {pred_logits.argmax()=}", endc)
+        #print(magenta, f"{ctx[z, end_indices[z]]=}", endc)
+        #print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, end_indices[z]+1, seq[z+1]]}{endc}")
 
-        pred_nt = ctx[z, end_indices[z]].detach().item()
-        real_nt = seq[z + 1].detach().item()
-        pred_logits = logits[z, end_indices[z] - 1]
-        print(red, pred_logits.max(), pred_logits.argmax(), endc)
-        print(magenta, ctx[z, end_indices[z]], endc)
-        print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {(rnt:=seq[z+1])}('{model.tokenizer.decode(rnt.detach().item())}'), logit on real next tok: {logits[z, end_indices[z]+1, seq[z+1]]}{endc}")
+        ctx_logits = logits[:, t.arange(cfg.seq_len - 1), ctx_g[:, -1]]
+        print(pink, ctx_logits.shape, endc)
+        imshow(ctx_logits)
+
+        rcl = t.zeros_like(ctx_logits)
+        for i in range(cfg.seq_len - 1):
+            for j in range(cfg.seq_len - 1):
+                if i == j: continue
+                rcl[i, j] = logits[i, j, ctx_g[i, j]]
+        
+        imshow(rcl)
 
 
-        pred_logits = logits[seq_indices[:-1], end_indices - 1, seq[seq_indices[:-1]]] # the logit on the correct token for the last token in the rollout (the real token prediction)
-        print(orange, pred_logits, endc)
-        rewards = (pred_logits - pred_logits.mean()) / pred_logits.std() # the reward is the normalized logit on the correct token
-        think_mask = ctx_g > model.cfg.d_normal_vocab
         
         ctx_map = t.zeros_like(ctx)
-        ctx_map[think_mask] = 1
+        ctx_map[ctx > model.eot] = 1
         ctx_map[ctx < model.eot] = -1
         ctx_map[ctx == model.eot] = 0
-        imshow(rewards.unsqueeze(0))
+        #imshow(rewards.unsqueeze(0))
         imshow(ctx_map)
         exit()
         
@@ -159,21 +160,3 @@ if __name__ == "__main__":
     dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-think-128-600M")
 
     train(model, training_cfg, dataset, "./saves")
-    
-    with t.no_grad():
-        ref = loadReferenceModel("openai-community/gpt2-xl")
-        print(vars(model))
-        ref_tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2-xl")
-        seq = dataset[0]['input_ids'][0:-20].unsqueeze(0)
-        print(blue, seq, endc)
-        str_toks = model.tokenizer.decode(seq.squeeze())
-        print(red, str_toks, endc)
-        toks = t.tensor(ref_tokenizer(str_toks)['input_ids']).unsqueeze(0)
-        print(purple, toks, endc)
-        with t.no_grad():
-            for _ in range(50):
-                logits = ref(toks).logits.squeeze()
-                next_token = sampleLogits(logits[-1])
-                toks = t.cat([toks, next_token.unsqueeze(0)], dim=-1)
-        out = "".join(ref_tokenizer.batch_decode(toks))
-        print(green, out, endc)
