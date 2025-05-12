@@ -48,6 +48,7 @@ class ThinkingModelConfig:
     def __init__(
             self,
             d_model:int = 512,
+            seq_len:int = 512,
             d_mlp:int = 2048,
             d_head:int = 64,
             n_heads:int = 8,
@@ -56,10 +57,11 @@ class ThinkingModelConfig:
             d_thought_vocab:int = 50257,
         ):
         self.d_model = d_model
-        self.n_heads = n_heads
-        self.n_layers = n_layers
+        self.seq_len = seq_len
         self.d_mlp = d_mlp
         self.d_head = d_head
+        self.n_heads = n_heads
+        self.n_layers = n_layers
         self.d_normal_vocab = d_normal_vocab
         self.d_thought_vocab = d_thought_vocab
         self.d_vocab_total = d_normal_vocab + d_thought_vocab
@@ -102,17 +104,18 @@ def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top
     probs = F.softmax(logits, dim=-1)
     return t.multinomial(probs, num_samples=1)
 
-def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, training_cfg: TrainingConfig, dataset_title, dataset_name, save_path: str, fraction: float = 1.0, pad=False):
+def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg: ModelConfig, dataset_title, dataset_name, save_name: str, fraction: float = 1.0, pad=False):
     dataset = datasets.load_dataset(dataset_title, name=dataset_name, split="train").train_test_split(fraction)['test']
     if pad:
-        dataset = dataset.map(lambda x: tokenizer(x['text'], padding='max_length', truncation=True, max_length=training_cfg.seq_len))
+        dataset = dataset.map(lambda x: tokenizer(x['text'], padding='max_length', truncation=True, max_length=cfg.seq_len))
     else:
-        dataset = dataset.filter(lambda x: len(x['input_ids']) >= training_cfg.seq_len).map(lambda x: tokenizer(x['text'], truncation=True, max_length=training_cfg.seq_len))
-    dataset.save_to_disk(save_path)
+        dataset = dataset.map(lambda x: tokenizer(x['text'], truncation=True, max_length=cfg.seq_len)).filter(lambda x: len(x['input_ids']) >= cfg.seq_len)
+    dataset.save_to_disk(f"datasets/{save_name}")
+    dataset.set_format(type='torch')
     return dataset
 
-def loadTokenizedDataset(path: str):
-    dataset = datasets.load_from_disk(path)
+def loadTokenizedDataset(name: str):
+    dataset = datasets.load_from_disk(f"datasets/{name}")
     dataset.set_format(type='torch')
     return dataset
 

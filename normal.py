@@ -2,6 +2,7 @@ import torch as t
 from torch import nn
 from torch.nn import functional as F
 from transformers import GPT2TokenizerFast
+import eindex
 import wandb
 import tqdm
 import datasets
@@ -35,7 +36,7 @@ class GPT2(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab, cfg.d_model)
-        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
+        self.pos_embed = nn.Linear(cfg.d_model, cfg.seq_len, bias=False)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
 
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
@@ -45,9 +46,8 @@ class GPT2(nn.Module):
     def decode(self, tokens):
         return self.tokenizer.batch_decode(tokens)
     def forward(self, x: t.Tensor) -> t.Tensor:
-        x = self.embed(x)
-        if x.ndim == 2: x = x.unsqueeze(0)
-        x = x + self.pos_embed.weight[:x.shape[1]]
+        if x.ndim == 1: x = x.unsqueeze(0)
+        x = self.embed(x) + self.pos_embed.weight[:x.shape[1], :]
         for i, block in enumerate(self.blocks):
             x = block(x)
         x = self.ln_f(x)
@@ -85,11 +85,8 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
         tokens = batch['input_ids']
         logits = model(tokens)
-        #logprobs = t.log_softmax(logits[:, :-1], dim=-1)
-        #loss = logprobs.gather(dim=-1, index=tokens[:, 1:].unsqueeze(-1)).squeeze(-1)
-        #loss = loss.mean()
-        loss = F.cross_entropy(logits[:, :-1, :].reshape(-1, logits.shape[-1]), tokens[:, 1:].reshape(-1))
-        #loss = F.cross_entropy(logits[:, :-1, :].reshape(-1, logits.shape[-1]), tokens[:, 1:].reshape(-1))
+        logprobs = t.log_softmax(logits[:, :-1], dim=-1)
+        loss = -eindex.eindex(logprobs, tokens[:, 1:], "batch seq [batch seq]").mean()
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -108,16 +105,11 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 if __name__ == "__main__":
     model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
     model = GPT2(model_cfg)
-
     training_cfg = TrainingConfig(batch_size=16, lr=3e-4, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
-    dataset = datasets.load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train").train_test_split(0.07)['test']
-    dataset = dataset.map(lambda x: model.tokenizer(x['text'], truncation=True, max_length=model_cfg.seq_len))
-    #dataset.save_to_disk(f"fineweb-edu-tokenized-600M")
-    #dataset = datasets.load_from_disk(f"datasets/fineweb-edu-tokenized-600M")
-    dataset.save_to_disk(f"datasets/fineweb-edu-tokenized-256")
-    exit()
 
-    dataset.set_format(type='torch')
+    #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
+    dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
+    
     train(model, training_cfg, dataset, "./saves")
 
 # current state:
