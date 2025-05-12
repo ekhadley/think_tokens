@@ -152,11 +152,10 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
-    training_cfg = TrainingConfig(seq_len=128, gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(seq_len=256, gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
-    #dataset = tokenizeAndSaveDataset(model.tokenizer, training_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-think-128-600M", 0.07, pad=False)
-    #dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-think-256-600M")
-    dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-think-128-600M")
+    #dataset = tokenizeAndSaveDataset(model.tokenizer, training_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-128", 0.07, pad=False)
+    dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-128")
 
     train(model, training_cfg, dataset, "./saves")
