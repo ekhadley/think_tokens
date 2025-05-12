@@ -108,9 +108,7 @@ if __name__ == "__main__":
     training_cfg = TrainingConfig(batch_size=16, lr=3e-4, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
-    #dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
-    dataset = datasets.load_dataset("eekay/fineweb-edu-tokenized-256", split="train")
-    dataset.save_to_disk("fineweb-edu-tokenized-256")
+    dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
     
     train(model, training_cfg, dataset, "./saves")
 
