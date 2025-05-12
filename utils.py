@@ -110,8 +110,8 @@ def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg: ModelConfig, datas
         dataset = dataset.map(lambda x: tokenizer(x['text'], padding='max_length', truncation=True, max_length=cfg.seq_len))
     else:
         dataset = dataset.map(lambda x: tokenizer(x['text'], truncation=True, max_length=cfg.seq_len)).filter(lambda x: len(x['input_ids']) >= cfg.seq_len)
-    dataset.save_to_disk(f"datasets/{save_name}")
     dataset.set_format(type='torch')
+    dataset.save_to_disk(f"datasets/{save_name}")
     return dataset
 
 def loadTokenizedDataset(name: str):
