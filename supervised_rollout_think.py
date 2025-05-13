@@ -90,7 +90,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
     completions_table = wandb.Table(columns=['completion'])
     #wandb.log({"sample_completions": completions_table})
     
-    seq_indices = t.arange(cfg.seq_len, dtype=t.int32, requires_grad=False)
+    seq_len = model.cfg.seq_len
+    seq_indices = t.arange(seq_len, dtype=t.int32, requires_grad=False)
 
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
     #dl = t.utils.data.DataLoader(dataset, batch_size=16)
@@ -98,12 +99,12 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         with t.inference_mode():
             model.eval()
             full_seq = batch['input_ids']
-            ctx = t.full((cfg.seq_len - 1, cfg.seq_len), model.eot, dtype=t.int32)
-            end_indices = t.arange(cfg.seq_len - 1, dtype=t.int32)
-            for i in range(training_cfg.seq_len - 1): 
+            ctx = t.full((seq_len - 1, seq_len), model.eot, dtype=t.int32)
+            end_indices = t.arange(seq_len - 1, dtype=t.int32)
+            for i in range(seq_len - 1): 
                 seq = full_seq.clone().squeeze()
                 seq[i+1:] = model.eot
-                for s in range(training_cfg.seq_len - i - 1):
+                for s in range(seq_len - i - 1):
                     logits: t.Tensor = model(seq[:end_indices[i] + 1]).squeeze()
                     next_token = logits[-1].argmax(-1)
                     if random.random() > 0.1: next_token = random.randint(model.cfg.d_normal_vocab + 1, model.cfg.d_vocab_total - 1)
@@ -116,24 +117,31 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         ctx_g = ctx.clone()
         logits = model(ctx_g)
 
-        #last_tt = ctx[z, end_indices[z] - 1].detach().item()
-        #print(purple, f"{last_tt=}", endc)
-        #pred_nt = ctx[z, end_indices[z]].detach().item()
-        #real_nt = seq[z + 1].detach().item()
-        #pred_logits = logits[z, end_indices[z] - 1]
-        #print(yellow, f"{logits.shape=}, {end_indices[z]=}, {seq.shape=}", endc)
-        #print(pink, f"{end_indices[z-2:z+2]}", endc)
-        #print(red, f"{pred_logits.max()=}, {pred_logits.argmax()=}", endc)
-        #print(magenta, f"{ctx[z, end_indices[z]]=}", endc)
-        #print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, end_indices[z]+1, seq[z+1]]}{endc}")
 
-        ctx_logits = logits[:, t.arange(cfg.seq_len - 1), ctx_g[:, -1]]
+        z = 30
+        last_tt = ctx[z, end_indices[z] - 1].detach().item()
+        print(purple, f"{last_tt=}", endc)
+        pred_nt = ctx[z, end_indices[z]].detach().item()
+        real_nt = seq[z + 1].detach().item()
+        pred_logits = logits[z, end_indices[z] - 1]
+        print(yellow, f"{logits.shape=}, {end_indices[z]=}, {seq.shape=}", endc)
+        print(pink, f"{end_indices[z-2:z+2]}", endc)
+        print(red, f"{pred_logits.max()=}, {pred_logits.argmax()=}", endc)
+        print(magenta, f"{ctx[z, end_indices[z]]=}", endc)
+        print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, end_indices[z]+1, seq[z+1]]}{endc}")
+
+        #ctx_logits = logits[:, t.arange(seq_len - 1), ctx_g[:, -1]]
+        logprobs = t.log_softmax(logits[:, :-1], dim=-1)
+        ctx_logprobs = eindex(logprobs, ctx_g, "batch seq [batch seq]")
+        print(pink, ctx_logprobs.shape, endc)
+        exit()
+
         print(pink, ctx_logits.shape, endc)
         imshow(ctx_logits)
 
         rcl = t.zeros_like(ctx_logits)
-        for i in range(cfg.seq_len - 1):
-            for j in range(cfg.seq_len - 1):
+        for i in range(seq_len - 1):
+            for j in range(seq_len - 1):
                 if i == j: continue
                 rcl[i, j] = logits[i, j, ctx_g[i, j]]
         
@@ -151,8 +159,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         
 
 if __name__ == "__main__":
-    model_cfg = ThinkingModelConfig(d_model=512, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
-    training_cfg = TrainingConfig(seq_len=256, gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
+    model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
+    training_cfg = TrainingConfig(gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, training_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-128", 0.07, pad=False)
