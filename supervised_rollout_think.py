@@ -3,10 +3,7 @@ import datasets
 import wandb
 import torch as t
 from torch import nn
-from torch.nn import functional as F
-import transformers as tf
 from transformers import GPT2TokenizerFast, AutoTokenizer
-import einops
 import random
 from eindex import eindex
 
@@ -40,7 +37,8 @@ class GPT2Thinking(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
-        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total - 1, bias=False)
+        self.pos_embed = nn.Linear(cfg.d_model, cfg.seq_len, bias=False)
+        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
         self.eot = 50256
 
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
@@ -49,7 +47,8 @@ class GPT2Thinking(nn.Module):
     def decode(self, tokens):
         return self.tokenizer.batch_decode(tokens)
     def forward(self, x: t.Tensor) -> t.Tensor:
-        x = self.embed(x)
+        if x.ndim == 1: x = x.unsqueeze(0)
+        x = self.embed(x) + self.pos_embed.weight[:x.shape[1], :]
         for i, block in enumerate(self.blocks):
             x = block(x)
         x = self.ln_f(x)
@@ -92,6 +91,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
     
     seq_len = model.cfg.seq_len
     seq_indices = t.arange(seq_len, dtype=t.int32, requires_grad=False)
+    seq_indices_m1 = t.arange(seq_len - 1, dtype=t.int32, requires_grad=False)
 
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
     #dl = t.utils.data.DataLoader(dataset, batch_size=16)
@@ -108,55 +108,56 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
                     logits: t.Tensor = model(seq[:end_indices[i] + 1]).squeeze()
                     next_token = logits[-1].argmax(-1)
                     if random.random() > 0.1: next_token = random.randint(model.cfg.d_normal_vocab + 1, model.cfg.d_vocab_total - 1)
-                    seq[i + s + 1] = next_token
                     end_indices[i] = i + s + 1
                     if next_token <= model.cfg.d_normal_vocab:
+                        seq[end_indices[i]] = full_seq[..., i + 1].detach()
                         break
-                ctx[i] = seq # save the context sequence
+                    else:
+                        seq[end_indices[i]] = next_token
+                
+                ctx[i] = seq
+            
+            model.printSeq(full_seq)
+            ctx_g = ctx.clone()
+            logits = model(ctx_g)
 
-        ctx_g = ctx.clone()
-        logits = model(ctx_g)
+            z = 10
+            last_tt = ctx[z, end_indices[z] - 1].detach().item()
+            print(purple, f"{last_tt=}", endc)
+            pred_nt = logits[z, end_indices[z]].argmax().detach().item()
+            real_nt = seq[z + 1].detach().item()
+            pred_logits = logits[z, end_indices[z] - 1]
+            print(yellow, f"{logits.shape=}, {ctx.shape=}, {end_indices.shape=}, {seq.shape=}", endc)
+            print(pink, f"{end_indices[z]}", endc)
+            print(red, f"{pred_logits.max()=}, {pred_logits.argmax()=}", endc)
+            print(magenta, f"{ctx[z, end_indices[z]]=}", endc)
+            print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, end_indices[z]-1, real_nt]}{endc}")
+            
+            #logprobs = t.log_softmax(logits[:, :-1], dim=-1)
+            #ctx_logprobs = logprobs[t.arange(seq_len -1 )[:, None], t.arange(seq_len - 1)[None, :], ctx_g[:, 1:]]
+            ctx_logits = logits[seq_indices_m1[:, None], seq_indices_m1[None, :], ctx_g[:, 1:]]
+            real_next_logits = logits[seq_indices_m1, end_indices - 1, ctx[-1, 1:]]
+            line(real_next_logits)
 
 
-        z = 30
-        last_tt = ctx[z, end_indices[z] - 1].detach().item()
-        print(purple, f"{last_tt=}", endc)
-        pred_nt = ctx[z, end_indices[z]].detach().item()
-        real_nt = seq[z + 1].detach().item()
-        pred_logits = logits[z, end_indices[z] - 1]
-        print(yellow, f"{logits.shape=}, {end_indices[z]=}, {seq.shape=}", endc)
-        print(pink, f"{end_indices[z-2:z+2]}", endc)
-        print(red, f"{pred_logits.max()=}, {pred_logits.argmax()=}", endc)
-        print(magenta, f"{ctx[z, end_indices[z]]=}", endc)
-        print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, end_indices[z]+1, seq[z+1]]}{endc}")
+            imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
+            imshow(ctx, title=f"tokens ({ctx.shape})")
+            ctx_map = t.zeros_like(ctx)
+            ctx_map[ctx > model.eot] = 1
+            ctx_map[ctx < model.eot] = -1
+            ctx_map[ctx == model.eot] = 0
+            #imshow(rewards.unsqueeze(0))
+            imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
 
-        #ctx_logits = logits[:, t.arange(seq_len - 1), ctx_g[:, -1]]
-        logprobs = t.log_softmax(logits[:, :-1], dim=-1)
-        ctx_logprobs = eindex(logprobs, ctx_g, "batch seq [batch seq]")
-        print(pink, ctx_logprobs.shape, endc)
-        exit()
+            discounts = t.zeros_like(ctx_logits)
+            for i in range(seq_len - 1):
+                discounts[i, i:end_indices[i]] = t.pow(cfg.gamma, t.arange(end_indices[i] - i)).flip(dims=(0,))
 
-        print(pink, ctx_logits.shape, endc)
-        imshow(ctx_logits)
-
-        rcl = t.zeros_like(ctx_logits)
-        for i in range(seq_len - 1):
-            for j in range(seq_len - 1):
-                if i == j: continue
-                rcl[i, j] = logits[i, j, ctx_g[i, j]]
+            imshow(discounts, title=f"discounts ({discounts.shape})")
         
-        imshow(rcl)
-
-
-        
-        ctx_map = t.zeros_like(ctx)
-        ctx_map[ctx > model.eot] = 1
-        ctx_map[ctx < model.eot] = -1
-        ctx_map[ctx == model.eot] = 0
-        #imshow(rewards.unsqueeze(0))
-        imshow(ctx_map)
-        exit()
-        
+            weighted_ctx_logits = ctx_logits * discounts
+            imshow(weighted_ctx_logits, title=f"weighted_ctx_logits ({weighted_ctx_logits.shape})")
+            exit()
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)

@@ -1,0 +1,13 @@
+- stuff yet to try:
+    - supervised rollout version not finished.
+        - we have think token weighted logits
+        - we have logits on real next token for each rollout
+        - we got discount factors calculated
+        - just need to mul and sum, i guess
+        - current version also is using logits instead of logprobs cuz going oom
+
+- if a normal thingy works, we should try continuous thinking token version
+    - might be out of scope honestly.
+        - how does the model 'tell us' the token it outputted was a thinking token?
+            - reserve a single residual stream element to signifiy thinking vs not?
+    - would probably want to replicate coconut or something similair to learn the ropes of mixed continuous and tokenized inputs/outputs

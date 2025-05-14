@@ -10,6 +10,22 @@ from eindex import eindex
 
 from utils import *
 
+def loadReferenceModel(model_name: str) -> AutoModelForCausalLM:
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype="float16",
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    model.eval()
+    return model
+
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(TransformerBlock, self).__init__()
@@ -38,7 +54,7 @@ class GPT2Thinking(nn.Module):
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
         self.pos_embed = nn.Linear(cfg.d_model, cfg.seq_len, bias=False)
-        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total - 1, bias=False) # -1 because we don't want to predict <pad>
+        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False) # -1 because we don't want to predict <pad>
 
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
     def encode(self, text):
