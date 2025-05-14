@@ -111,7 +111,3 @@ if __name__ == "__main__":
     dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
     
     train(model, training_cfg, dataset, "./saves")
-
-# current state:
-# why running oom?
-# update thinking versions to use logprob loss, oops
