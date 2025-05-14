@@ -1,10 +1,6 @@
 - stuff yet to try:
-    - supervised rollout version not finished.
-        - we have think token weighted logits
-        - we have logits on real next token for each rollout
-        - we got discount factors calculated
-        - just need to mul and sum, i guess
-        - current version also is using logits instead of logprobs cuz going oom
+    - judged model rollouts version (rollout_think) should be using thinking token logprobs not thinking token logits
+    - supervised rollout version (supervised_rollout_think) finished?
 
 - if a normal thingy works, we should try continuous thinking token version
     - might be out of scope honestly.
