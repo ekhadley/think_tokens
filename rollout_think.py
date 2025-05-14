@@ -113,12 +113,12 @@ t.set_default_device(t.device("cuda"))
 t.autocast(device_type="cuda", enabled=True, dtype=t.float16)
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
-    optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True) # maximize=True for reward
+    optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True) # maximize = True for reward
     sample_completion_prompt = "George Washington was"
 
     model.train()
 
-    wandb.init(project="thoughtful", name="gpt2s_think_rep_pen", config=cfg)
+    wandb.init(project="thoughtful", name="gpt2s_think_ref_lgts", config=cfg)
     wandb.watch(model, log="all")
     completions_table = wandb.Table(columns=['completion'])
     #wandb.log({"sample_completions": completions_table})
@@ -141,7 +141,6 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
             #seq = batch['input_ids'].repeat(cfg.batch_size, 1)
             seq = batch['input_ids']
             
-            repetition_penalty = 1.2
             for i in range(seq_len): # inference out next tokens
                 logits = model(seq)
                 next_token = sampleLogits(logits[:, -1, :])
@@ -152,8 +151,8 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
             masked_toks = seq * real_toks_mask # mask out thought tokens
 
             ref_logits = ref(masked_toks, attention_mask=real_toks_mask).logits # get logits from reference model. this tells us house likely* the learning model's outputs were
-            ref_logprobs = t.log_softmax(ref_logits, dim=-1)
-            rewards: t.Tensor = eindex(ref_logprobs[:, seq_len-1:-1, :], masked_toks[:, seq_len:], "batch seq [batch seq]") * real_toks_mask[:, seq_len-1:-1] # rewards are the logits of the reference model for the tokens we generated
+            #ref_logprobs = t.log_softmax(ref_logits, dim=-1)
+            rewards: t.Tensor = eindex(ref_logits[:, seq_len-1:-1, :], masked_toks[:, seq_len:], "batch seq [batch seq]") * real_toks_mask[:, seq_len-1:-1] # rewards are the logits of the reference model for the tokens we generated
             
             #model.printSeq(seq[0])
             #z = 127
@@ -181,13 +180,14 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 
         model.train()
         logits = model(seq)
-        seq_logits: t.Tensor = eindex(logits[:, seq_len-1:-1, :], seq[:, seq_len:], "batch seq [batch seq]")
-        weighted_logits = seq_logits * discounted_rewards # higher reward is good. higher logit means higher probability. want prob to go up for positive reward actions
+        logprobs = t.log_softmax(logits, dim=-1)
+        seq_logprobs: t.Tensor = eindex(logprobs[:, seq_len-1:-1, :], seq[:, seq_len:], "batch seq [batch seq]")
+        weighted_logprobs = seq_logprobs * discounted_rewards # higher reward (ref logit) is good. higher logprob means higher probability of token. want prob to go up for positive reward tokens
         
         entropy_weight = 0.2
-        entropy = -(logits.softmax(dim=-1) * logits.log_softmax(dim=-1)).sum(-1).mean()
+        entropy = -(logits.softmax(dim=-1) * logprobs).sum(-1).mean() # entropy of the logits
         entropy_loss = entropy_weight * entropy
-        loss = weighted_logits.mean() + entropy_loss # maximize the logit and minimize the entropy
+        loss = weighted_logprobs.mean() + entropy_loss # maximize the logit and minimize the entropy
         
         #loss = weighted_logits.mean()
         loss.backward()
