@@ -1,6 +1,4 @@
 - stuff yet to try:
-    - judged model rollouts version (rollout_think) should be using thinking token logprobs not thinking token logits
-    - supervised rollout version (supervised_rollout_think) finished?
     - alternate approach: maybe we just do inference with gradients on?
         - does this avoid the need for rl?
         - we just sample tokens and append to the context until we get a normal token.
