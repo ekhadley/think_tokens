@@ -37,7 +37,7 @@ class GPT2Thinking(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
-        self.pos_embed = nn.Linear(cfg.d_model, cfg.seq_len, bias=False)
+        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
         self.eot = 50256
         self.end_thought = cfg.d_vocab_total - 2
@@ -49,7 +49,7 @@ class GPT2Thinking(nn.Module):
         return self.tokenizer.batch_decode(tokens)
     def forward(self, x: t.Tensor) -> t.Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
-        x = self.embed(x) + self.pos_embed.weight[:x.shape[1], :]
+        x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
         for i, block in enumerate(self.blocks):
             x = block(x)
         x = self.ln_f(x)
@@ -160,35 +160,33 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
 
         # action logprobs times normalized rewards. we want to maximize this.
         # strangely though, here the rewards are differentiable as well.
-        weighted_logprobs = ctx_logprobs * rewards.unsqueeze(1) 
-
-
-        loss = weighted_logprobs.mean()
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
 
         #print(cyan, logits[z, end_indices[z], real_nt], endc)
         #print(lime, pred_logits, endc)
         #print(red, seq_indices_m1[:10], blue, end_indices[:10], green, ctx[-1, :10], endc)
         #line(pred_logits)
-        #imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
+        imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
         #imshow(ctx_logprobs, title=f"ctx_logprobs ({ctx_logprobs.shape})")
         #imshow(weighted_logprobs, title=f"weighted_logprobs ({weighted_logprobs.shape})")
         #imshow(ctx, title=f"tokens ({ctx.shape})")
-        #ctx_map = t.zeros_like(ctx)
-        #ctx_map[ctx > model.eot] = 1
-        #ctx_map[ctx < model.eot] = -1
-        #ctx_map[ctx == model.eot] = 0
-        #ctx_map[ctx == model.end_thought] = -2
-        #imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
+        ctx_map = t.zeros_like(ctx)
+        ctx_map[ctx > model.eot] = 1
+        ctx_map[ctx < model.eot] = -1
+        ctx_map[ctx == model.eot] = 0
+        ctx_map[ctx == model.end_thought] = -2
+        imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
 
-        #discounts = t.zeros_like(ctx_logits)
-        #for i in range(seq_len - 1):
-        #     discounts[i, i:end_indices[i]] = t.pow(cfg.gamma, t.arange(end_indices[i] - i)).flip(dims=(0,))
-        #imshow(discounts, title=f"discounts ({discounts.shape})")
+        discounts = t.zeros_like(ctx_logits)
+        for i in range(seq_len - 1):
+             discounts[i, i:end_indices[i]] = t.pow(cfg.gamma, t.arange(end_indices[i] - i)).flip(dims=(0,))
+        imshow(discounts, title=f"discounts ({discounts.shape})")
 
-        #weighted_ctx_logits = ctx_logits * discounts
+        weighted_ctx_logprobs = ctx_logprobs * discounts
+        weighted_action_scores = weighted_ctx_logprobs * rewards.unsqueeze(1) 
+        loss = weighted_action_scores.mean()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
         #imshow(weighted_ctx_logits, title=f"weighted_ctx_logits ({weighted_ctx_logits.shape})")
         exit()
 

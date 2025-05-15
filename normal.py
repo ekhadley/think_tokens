@@ -36,7 +36,7 @@ class GPT2(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab, cfg.d_model)
-        self.pos_embed = nn.Linear(cfg.d_model, cfg.seq_len, bias=False)
+        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
 
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
@@ -47,7 +47,7 @@ class GPT2(nn.Module):
         return self.tokenizer.batch_decode(tokens)
     def forward(self, x: t.Tensor) -> t.Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
-        x = self.embed(x) + self.pos_embed.weight[:x.shape[1], :]
+        x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
         for i, block in enumerate(self.blocks):
             x = block(x)
         x = self.ln_f(x)
@@ -64,7 +64,6 @@ class GPT2(nn.Module):
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
-t.autocast(device_type="cuda", enabled=True, dtype=t.float16)
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
@@ -78,8 +77,6 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     print(yellow, sample_completion, endc)
     table = wandb.Table(data=[[sample_completion]], columns=['completion'])
     wandb.log({"sample_completion": table})
-
-    seq_indices = t.arange(model.cfg.seq_len, requires_grad=False)
 
     dl = t.utils.data.DataLoader(dataset, batch_size=cfg.batch_size)
     for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):

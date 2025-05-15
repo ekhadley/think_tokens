@@ -53,7 +53,7 @@ class GPT2Thinking(nn.Module):
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
-        self.pos_embed = nn.Linear(cfg.d_model, cfg.seq_len, bias=False)
+        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False) # -1 because we don't want to predict <pad>
 
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
@@ -63,7 +63,7 @@ class GPT2Thinking(nn.Module):
         return self.tokenizer.batch_decode(tokens)
     def forward(self, x: t.Tensor) -> t.Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
-        x = self.embed(x) + self.pos_embed.weight[:x.shape[1], :]
+        x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
         for i, block in enumerate(self.blocks):
             x = block(x)
         x = self.ln_f(x)
@@ -164,8 +164,8 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
             #print(purple, rewards[0], endc)
             #exit()
 
-            reward_mean, reward_std = rewards.mean(), rewards.var()
-            normalized_rewards = (rewards - reward_mean) / (reward_std + 1e-8) # normalize rewards
+            reward_mean, reward_var = rewards.mean(), rewards.var()
+            normalized_rewards = (rewards - reward_mean) / (reward_var + 1e-8) # normalize rewards
             discounted_rewards = (normalized_rewards.unsqueeze(1) * discounts.unsqueeze(0)).sum(-1) # discounted rtg
 
             if b%100 == 0:
@@ -189,7 +189,6 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
         entropy_loss = entropy_weight * entropy
         loss = weighted_logprobs.mean() + entropy_loss # maximize the logit and minimize the entropy
         
-        #loss = weighted_logits.mean()
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
