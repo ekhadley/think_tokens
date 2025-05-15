@@ -195,7 +195,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 
         wandb.log({"entropy_loss": entropy_loss})
         wandb.log({"reward_mean": reward_mean})
-        wandb.log({"reward_std": reward_std})
+        wandb.log({"reward_std": reward_var})
         wandb.log({"think_tok_prop": (~real_toks_mask).count_nonzero()/(seq.numel()/2)})
         wandb.log({"weighted_token_logits": loss.detach().item()})
         tr.set_description(f"{magenta}reward_mean: {reward_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}")
