@@ -8,8 +8,11 @@
         - you can do a reparameterization trick, taking the logit on the thought token as the think to backprop on
         - need to think more about this approach but i dont think it works
 
-- if a normal thingy works, we should try continuous thinking token version
-    - might be out of scope honestly.
-        - how does the model 'tell us' the token it outputted was a thinking token?
-            - reserve a single residual stream element to signifiy thinking vs not?
-    - would probably want to replicate coconut or something similair to learn the ropes of mixed continuous and tokenized inputs/outputs
+    - if a normal thingy works, we should try continuous thinking token version
+        - might be out of scope honestly.
+            - how does the model 'tell us' the token it outputted was a thinking token?
+                - reserve a single residual stream element to signifiy thinking vs not?
+        - would probably want to replicate coconut or something similair to learn the ropes of mixed continuous and tokenized inputs/outputs
+
+    - take a pretrained model and just expand its embed/unembed with random stuff, then apply ther rl.
+        - greatly mitigates issues with having to explore the very dense action space, hunting for the single correct next token.
