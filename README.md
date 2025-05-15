@@ -6,6 +6,9 @@
         - we just sample tokens and append to the context until we get a normal token.
         - by keeping gradients during inference, when we do a backward pass on the supervised loss,
         the gradients propogate all the way through to the thinking tokens, right?
+        - no it doesnt quite work like that since you cant backprop through sampling/tokenization.
+        - you can do a reparameterization trick, taking the logit on the thought token as the think to backprop on
+        - need to think more about this approach but i dont think it works
 
 - if a normal thingy works, we should try continuous thinking token version
     - might be out of scope honestly.
