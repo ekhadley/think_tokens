@@ -208,7 +208,7 @@ if __name__ == "__main__":
     
     import normal
     normal_model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
-    normal_model = loadModel("saves/normal35000.pth", normal.GPT2, normal_model_cfg)
+    normal_model = loadModel("saves/normal27000.pth", normal.GPT2, normal_model_cfg)
     model = LoadNormalModelAsThinking(normal_model, GPT2Thinking, model_cfg)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", "fineweb-edu-tokenized-128", 0.07, pad=False)
