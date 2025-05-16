@@ -116,7 +116,7 @@ def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg: ModelConfig, datas
 
 def loadModel(model_path: str, model_class, cfg):
     model = model_class(cfg)
-    model.load_state_dict(t.load(model_path))
+    model.load_state_dict(t.load(model_path, weights_only=False))
     return model
 
 def loadTokenizedDataset(name: str):
