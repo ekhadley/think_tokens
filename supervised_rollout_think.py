@@ -93,8 +93,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
     #wandb.log({"sample_completions": completions_table})
     
     seq_len = model.cfg.seq_len
-    seq_indices = t.arange(seq_len, dtype=t.int32, requires_grad=False)
-    seq_indices_m1 = t.arange(seq_len - 1, dtype=t.int32, requires_grad=False)
+    seq_indices = t.arange(seq_len, dtype=t.int32, requires_grad=True)
+    seq_indices_m1 = t.arange(seq_len - 1, dtype=t.int32, requires_grad=True)
 
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
     #dl = t.utils.data.DataLoader(dataset, batch_size=16)
@@ -131,8 +131,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         # ctx holds all our tokens. We generate it withou gradients during the inference step, then clone it.
         # For a sequence of length s, we perform s rollouts. So each row of ctx is an input subsequence followed by a rollout, ending with the end_thought token.
         # ctx has s rows.
-        ctx_g = ctx.clone()
-        logits = model(ctx_g) # These are the model's logits (with gradients) on the ctx sequence.
+        ctx = ctx.clone()
+        logits = model(ctx) # These are the model's logits (with gradients) on the ctx sequence.
+        end_endices = end_indices.clone()
 
         #z = 0
         #last_tt = ctx[z, end_indices[z] - 1].detach().item()
@@ -145,7 +146,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #print(f"{purple}start: {z}, end: {end_indices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, end_indices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, end_indices[z]-1, real_nt]}{endc}")
         
         # These are the models next-token logits and logprobs for each token in each sequence.
-        ctx_logits = logits[seq_indices_m1[:, None], seq_indices_m1[None, :], ctx_g[:, 1:]] 
+        ctx_logits = logits[seq_indices_m1[:, None], seq_indices_m1[None, :], ctx[:, 1:]] 
         ctx_logprobs = t.log_softmax(ctx_logits, dim=-1)
 
         # The logit value at the end_thought token position corresponding to the true next token. We want to maximize these: the logit for the actual next token. These are our rewards.
@@ -165,16 +166,16 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #print(lime, pred_logits, endc)
         #print(red, seq_indices_m1[:10], blue, end_indices[:10], green, ctx[-1, :10], endc)
         #line(pred_logits)
-        imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
+        #imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
         #imshow(ctx_logprobs, title=f"ctx_logprobs ({ctx_logprobs.shape})")
         #imshow(weighted_logprobs, title=f"weighted_logprobs ({weighted_logprobs.shape})")
         #imshow(ctx, title=f"tokens ({ctx.shape})")
-        ctx_map = t.zeros_like(ctx)
-        ctx_map[ctx > model.eot] = 1
-        ctx_map[ctx < model.eot] = -1
-        ctx_map[ctx == model.eot] = 0
-        ctx_map[ctx == model.end_thought] = -2
-        imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
+        #ctx_map = t.zeros_like(ctx)
+        #ctx_map[ctx > model.eot] = 1
+        #ctx_map[ctx < model.eot] = -1
+        #ctx_map[ctx == model.eot] = 0
+        #ctx_map[ctx == model.end_thought] = -2
+        #imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
 
         discounts = t.zeros_like(ctx_logits)
         for i in range(seq_len - 1):
