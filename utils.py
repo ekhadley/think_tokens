@@ -114,15 +114,41 @@ def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg: ModelConfig, datas
     dataset.save_to_disk(f"datasets/{save_name}")
     return dataset
 
+def loadModel(model_path: str, model_class, cfg):
+    model = model_class(cfg)
+    model.load_state_dict(t.load(model_path))
+    return model
+
 def loadTokenizedDataset(name: str):
     dataset = datasets.load_from_disk(f"datasets/{name}")
     dataset.set_format(type='torch')
     return dataset
 
+def LoadNormalModelAsThinking(normal_model: nn.Module, thinking_model_class, thinking_cfg: ThinkingModelConfig):
+    model = thinking_model_class(thinking_cfg)
+
+    # Copy transformer blocks and ln_f
+    model.blocks.load_state_dict(normal_model.blocks.state_dict())
+    model.ln_f.load_state_dict(normal_model.ln_f.state_dict())
+
+    # Resize embeddings and unembedding
+    resize_embedding(model.pos_embed, normal_model.pos_embed)
+    resize_embedding(model.embed, normal_model.embed)
+    resize_embedding(model.unembed, normal_model.unembed)
+
+    # Optionally copy tokenizer if needed
+    if hasattr(normal_model, 'tokenizer'):
+        model.tokenizer = normal_model.tokenizer
+
+    return model
+
+
+
+
+
 
 
 # plotting stuff
-
 def line(logits: t.Tensor) -> None:
     plot = plotly.graph_objects.Figure()
     plot.add_trace(plotly.graph_objects.Scatter(y=logits.squeeze().cpu().numpy(), mode='lines', name='logits'))
@@ -212,3 +238,17 @@ def imshow(tensor: t.Tensor, renderer=None, **kwargs):
             xaxis_name = "xaxis" if i == 1 else f"xaxis{i}"
             fig.layout[xaxis_name]["tickangle"] = xaxis_tickangle
     return fig if return_fig else fig.show(renderer=renderer, config={"staticPlot": static})
+
+def resize_embedding(target_embed, source_embed):
+    """
+    Resize (expand or shrink) the target embedding weights to match the source as much as possible.
+    Copies overlapping rows, initializes new rows if needed.
+    """
+    with t.no_grad():
+        old_weight = source_embed.weight.data
+        new_weight = target_embed.weight.data
+        min_rows = min(old_weight.shape[0], new_weight.shape[0])
+        new_weight[:min_rows] = old_weight[:min_rows]
+        if new_weight.shape[0] > old_weight.shape[0]:
+            nn.init.normal_(new_weight[old_weight.shape[0]:], mean=0.0, std=0.02)
+        target_embed.weight.data = new_weight

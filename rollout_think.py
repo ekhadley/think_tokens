@@ -151,8 +151,9 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
             masked_toks = seq * real_toks_mask # mask out thought tokens
 
             ref_logits = ref(masked_toks, attention_mask=real_toks_mask).logits # get logits from reference model. this tells us house likely* the learning model's outputs were
-            ref_logprobs = t.log_softmax(ref_logits, dim=-1)
-            rewards: t.Tensor = eindex(ref_logprobs[:, seq_len-1:-1, :], masked_toks[:, seq_len:], "batch seq [batch seq]") * real_toks_mask[:, seq_len-1:-1] # rewards are the logits of the reference model for the tokens we generated
+            rewards: t.Tensor = eindex(ref_logits[:, seq_len-1:-1, :], masked_toks[:, seq_len:], "batch seq [batch seq]") * real_toks_mask[:, seq_len-1:-1] # rewards are the logits of the reference model for the tokens we generated
+            #ref_logprobs = t.log_softmax(ref_logits, dim=-1)
+            #rewards: t.Tensor = eindex(ref_logprobs[:, seq_len-1:-1, :], masked_toks[:, seq_len:], "batch seq [batch seq]") * real_toks_mask[:, seq_len-1:-1] # rewards are the logits of the reference model for the tokens we generated
             
             #model.printSeq(seq[0])
             #z = 127
@@ -173,7 +174,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
                 wandb.log({"sample_completions": completions_table})
                 print()
                 model.printSeq(seq[0])
-                t.save(model.state_dict(), f"{save_dir}/think_save_{b}.pth")
+                t.save(model.state_dict(), f"{save_dir}/rollout_think{b}.pth")
 
         seq = seq.clone()
         discounted_rewards = discounted_rewards.clone()
@@ -203,7 +204,12 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
     training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
-    model = GPT2Thinking(model_cfg)
+    #model = GPT2Thinking(model_cfg)
+    
+    import normal
+    normal_model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
+    normal_model = loadModel("saves/normal35000.pth", normal.GPT2, normal_model_cfg)
+    model = LoadNormalModelAsThinking(normal_model, GPT2Thinking, model_cfg)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", "fineweb-edu-tokenized-128", 0.07, pad=False)
     dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-128")

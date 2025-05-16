@@ -97,7 +97,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
             table = wandb.Table(data=[[sample_completion]], columns=['completion'])
             wandb.log({"sample_completion": table})
 
-            t.save(model.state_dict(), f"{save_dir}/save_{i}.pth")
+            t.save(model.state_dict(), f"{save_dir}/normal{i}.pth")
 
 if __name__ == "__main__":
     model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
