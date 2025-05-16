@@ -204,12 +204,11 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
     training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
-    #model = GPT2Thinking(model_cfg)
-    
-    import normal
-    normal_model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
-    normal_model = loadModel("saves/normal26000.pth", normal.GPT2, normal_model_cfg)
-    model = LoadNormalModelAsThinking(normal_model, GPT2Thinking, model_cfg)
+    model = GPT2Thinking(model_cfg)
+    #import normal
+    #normal_model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
+    #normal_model = loadModel("saves/normal26000.pth", normal.GPT2, normal_model_cfg)
+    #model = LoadNormalModelAsThinking(normal_model, GPT2Thinking, model_cfg)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", "fineweb-edu-tokenized-128", 0.07, pad=False)
     dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-128")
