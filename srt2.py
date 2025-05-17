@@ -180,11 +180,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #ctx_map[ctx == model.end_thought] = -2
         #imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
 
-        discounts = t.zeros_like(ctx_logits)
-        for i in range(seq_len - 1):
-             discounts[i, i:endices[i]] = t.pow(cfg.gamma, t.arange(endices[i] - i)).flip(dims=(0,)) 
-        #imshow(discounts, title=f"discounts ({discounts.shape})")
-
         weighted_logprobs = ctx_logprobs * discounts
         weighted_action_scores = weighted_logprobs * rewards.unsqueeze(1)
         loss = weighted_action_scores.sum()
