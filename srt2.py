@@ -98,6 +98,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
     
     seq_len = model.cfg.seq_len
     seq_indices = t.arange(seq_len - 1, dtype=t.int32)
+    lower_mask = t.tril(t.ones((seq_len, seq_len)), diagonal=-1).bool()
 
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
     #dl = t.utils.data.DataLoader(dataset, batch_size=16)
@@ -141,8 +142,16 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         # ctx has s rows.
         ctx = ctx.clone()
         logits = model(ctx) # These are the model's logits (with gradients) on the ctx sequence.
+        endices = endices.clone()
 
-        #z = 0
+
+        imshow(ctx, title=f"tokens ({ctx.shape})")
+        ctx_map = t.zeros_like(ctx)
+        ctx_map[ctx > model.eot] = 1
+        ctx_map[ctx < model.eot] = -1
+        ctx_map[ctx == model.eot] = 0
+        ctx_map[ctx == model.end_thought] = -2
+        imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
         #last_tt = ctx[z, endices[z] - 1].detach().item()
         #print(purple, f"{last_tt=}", endc)
         #pred_nt = logits[z, endices[z]].argmax().detach().item()
@@ -151,43 +160,24 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #print(pink, f"{endices[z]}", endc)
         #print(magenta, f"{ctx[z, endices[z]]=}", endc)
         #print(f"{purple}start: {z}, end: {endices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, endices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, endices[z]-1, real_nt]}{endc}")
+
         
         # These are the models next-token logits and logprobs for each token in each sequence.
         ctx_logits = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
         ctx_logprobs = t.log_softmax(ctx_logits, dim=-1)
+        print(red, ctx_logits.shape, blue, ctx_logprobs.shape, endc)
 
         # The logit value at the end_thought token position corresponding to the true next token. We want to maximize these: the logit for the actual next token. These are our rewards.
-        pred_logits = logits[seq_indices, endices.clone(), ctx[-1, 1:]]
-        logit_mean, logit_std = pred_logits.mean().detach(), pred_logits.std().detach() # detach mean so that gradients push mean upwawrds? maybe?
-        # normalize rewards across all the rollouts. The think token logprobs of the top half,
-        # (in terms of logit on correct token on the end_thought position) are reinforced, the bottom half are pushed down.
-        rewards = (pred_logits - logit_mean) / (logit_std + 1e-8)
+        next_tok_logits = logits[seq_indices, endices, ctx[-1, 1:]]
 
-        # action logprobs times normalized rewards. we want to maximize this.
-        # strangely though, here the rewards are differentiable as well.
 
-        #print(cyan, logits[z, endices[z], real_nt], endc)
-        #print(lime, pred_logits, endc)
-        #print(red, seq_indices[:10], blue, endices[:10], green, ctx[-1, :10], endc)
-        #line(pred_logits.detach())
-        #imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
-        #imshow(ctx_logprobs, title=f"ctx_logprobs ({ctx_logprobs.shape})")
-        #imshow(ctx, title=f"tokens ({ctx.shape})")
-        #ctx_map = t.zeros_like(ctx)
-        #ctx_map[ctx > model.eot] = 1
-        #ctx_map[ctx < model.eot] = -1
-        #ctx_map[ctx == model.eot] = 0
-        #ctx_map[ctx == model.end_thought] = -2
-        #imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
-
-        weighted_logprobs = ctx_logprobs * discounts
-        weighted_action_scores = weighted_logprobs * rewards.unsqueeze(1)
-        loss = weighted_action_scores.sum()
+        think_scores = ctx_logprobs * lower_mask
+        think_scores[think_scores == model.eot] = 0
+        think_scores = think_scores * rewards.unsqueeze(1)
+        loss = think_scores.mean() + rewards.mean()
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-        #imshow(weighted_logprobs, title=f"weighted_logprobs ({weighted_logprobs.shape})")
-        #exit()
 
         wandb.log({"reward_mean": logit_mean})
         wandb.log({"reward_std": logit_std})
@@ -196,7 +186,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         tr.set_description(f"{magenta}reward_mean: {logit_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}, %think: {think_tok_prop:.3f}")
 
 if __name__ == "__main__":
-    model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
+    model_cfg = ThinkingModelConfig(d_model=64, seq_len=128, d_mlp=2048, d_head=64, n_heads=2, n_layers=2, d_normal_vocab=50257, d_thought_vocab=2048)
     training_cfg = TrainingConfig(gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
