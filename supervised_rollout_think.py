@@ -61,7 +61,6 @@ class GPT2Thinking(nn.Module):
             for _ in range(max_length):
                 next_token = 0
                 while next_token != self.end_thought:
-                    print(red, tokens, endc)
                     logits = self.forward(tokens)
                     next_token = logits[0, -1, self.cfg.d_normal_vocab:].argmax(-1).item() + self.cfg.d_normal_vocab
                     tokens = t.cat((tokens, t.tensor([next_token], device=tokens.device)), dim=0)
