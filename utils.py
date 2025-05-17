@@ -64,7 +64,7 @@ class ThinkingModelConfig:
         self.n_layers = n_layers
         self.d_normal_vocab = d_normal_vocab
         self.d_thought_vocab = d_thought_vocab
-        self.d_vocab_total = d_normal_vocab + d_thought_vocab
+        self.d_vocab_total = d_normal_vocab + d_thought_vocab + 1
 
 class TrainingConfig:
     def __init__(
