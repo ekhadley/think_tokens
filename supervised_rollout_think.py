@@ -77,8 +77,8 @@ class GPT2Thinking(nn.Module):
     def printSeq(self, seq: t.Tensor) -> None:
         print("\n", self.seqStr(seq))
 
-#t.backends.cuda.enable_flash_sdp(enabled=True)
-#t.set_default_device(t.device("cuda"))
+t.backends.cuda.enable_flash_sdp(enabled=True)
+t.set_default_device(t.device("cuda"))
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
