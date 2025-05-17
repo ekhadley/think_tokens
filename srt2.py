@@ -147,7 +147,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         optimizer.step()
         optimizer.zero_grad()
 
-        tr.set_description(f"{magenta}loss: {loss.detach().item():.3f}, %think: {think_tok_prop:.3f}")
+        tr.set_description(f"{magenta}loss: {loss.detach().item():.3f} ")
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
