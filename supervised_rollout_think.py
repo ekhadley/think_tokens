@@ -185,6 +185,12 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #imshow(weighted_logprobs, title=f"weighted_logprobs ({weighted_logprobs.shape})")
         #exit()
 
+        wandb.log({"reward_mean": logit_mean})
+        wandb.log({"reward_std": logit_std})
+        wandb.log({"think_tok_prop": (endices-seq_indices).sum()/seq_len})
+        wandb.log({"weighted_token_logits": loss.detach().item()})
+        tr.set_description(f"{magenta}reward_mean: {logit_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}")
+
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=4, n_layers=4, d_normal_vocab=50257, d_thought_vocab=2048)
     training_cfg = TrainingConfig(gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
