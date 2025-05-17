@@ -108,7 +108,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
                 for s in range(seq_len - i - 1): # iterates over the string of thinking tokens the model produces
                     logits: t.Tensor = model(seq[:endices[i] + 1])
 
-                    next_token = logits[0, -1, model.cfg.d_normal_vocab:model.cfg.d_vocab_total].argmax(-1) + model.cfg.d_normal_vocab # sampling only from thinking tokens
+                    next_token = logits[0, -1, model.cfg.d_normal_vocab:model.cfg.d_vocab_total].argmax(-1) + model.cfg.d_normal_vocab - 1 # sampling only from thinking tokens
                     if random.random() > 0.1: next_token = random.randint(model.cfg.d_normal_vocab, model.cfg.d_vocab_total) # artificially inflate prob of producing a thinking token
                     if i + s >= 126 or random.random() > 0.7: next_token = model.end_thought # artificially inflate prob of producing end thought token
 
