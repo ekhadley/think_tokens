@@ -58,10 +58,10 @@ class GPT2Thinking(nn.Module):
     def yap(self, prompt: str, max_length: int = 50) -> t.Tensor:
         with t.inference_mode():
             tokens = t.tensor(self.tokenizer(prompt).input_ids).squeeze()
+            print(blue, tokens.shape, endc)
+            exit()
             for _ in range(max_length):
-                logits = self(tokens).squeeze()
-                next_token = sampleLogits(logits[-1], 0.9)
-                tokens = t.cat([tokens, next_token], dim=-1)
+                
         return tokens.squeeze()
     def seqStr(self, seq: t.Tensor) -> str:
         out = ""
@@ -125,7 +125,11 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
             # A single next token prediction consists of giving the model a sequence from the dataset, doing inference, producing thinking tokens, then producing an end_thought token.
             # The prediction on the end_thought sequence position is the real next token prediction.
             if b%100 == 0:
-                model.printSeq(full_seq)
+                completion = model.yap(batch['text'][0])
+                completion_str = model.seqStr(full_seq)
+                print("\n", completion_str)
+                completions_table.add_data(completion_str)
+                wandb.log({"sample_completions": completions_table})
                 t.save(model.state_dict(), f"{save_dir}/supervised_rollout_think{b}.pth") 
         # ctx holds all our tokens. We generate it withou gradients during the inference step, then clone it.
         # For a sequence of length s, we perform s rollouts. So each row of ctx is an input subsequence followed by a rollout, ending with the end_thought token.
@@ -144,7 +148,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #print(f"{purple}start: {z}, end: {endices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, endices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, endices[z]-1, real_nt]}{endc}")
         
         # These are the models next-token logits and logprobs for each token in each sequence.
-        ctx_logits = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]] 
+        ctx_logits = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
         ctx_logprobs = t.log_softmax(ctx_logits, dim=-1)
 
         # The logit value at the end_thought token position corresponding to the true next token. We want to maximize these: the logit for the actual next token. These are our rewards.
@@ -152,7 +156,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         logit_mean, logit_std = pred_logits.mean().detach(), pred_logits.std().detach() # detach mean so that gradients push mean upwawrds? maybe?
         # normalize rewards across all the rollouts. The think token logprobs of the top half,
         # (in terms of logit on correct token on the end_thought position) are reinforced, the bottom half are pushed down.
-        rewards = (pred_logits - logit_mean) / (logit_std + 1e-8) 
+        rewards = (pred_logits - logit_mean) / (logit_std + 1e-8)
 
         # action logprobs times normalized rewards. we want to maximize this.
         # strangely though, here the rewards are differentiable as well.
@@ -192,7 +196,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         tr.set_description(f"{magenta}reward_mean: {logit_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}, %think: {think_tok_prop:.3f}")
 
 if __name__ == "__main__":
-    model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=2, n_layers=2, d_normal_vocab=50257, d_thought_vocab=2048)
+    model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
     training_cfg = TrainingConfig(gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
