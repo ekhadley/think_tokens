@@ -40,7 +40,7 @@ class GPT2Thinking(nn.Module):
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
         self.eot = 50256
-        self.end_thought = cfg.d_vocab_total - 1
+        self.end_thought = cfg.d_vocab_total - 2
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     def encode(self, text):
@@ -57,11 +57,17 @@ class GPT2Thinking(nn.Module):
         return x
     def yap(self, prompt: str, max_length: int = 50) -> t.Tensor:
         with t.inference_mode():
-            tokens = t.tensor(self.tokenizer(prompt).input_ids).squeeze()
-            print(blue, tokens.shape, endc)
-            exit()
+            tokens = t.tensor(self.tokenizer(prompt).input_ids)
             for _ in range(max_length):
-                
+                next_token = 0
+                while next_token != self.end_thought:
+                    print(red, tokens, endc)
+                    logits = self.forward(tokens)
+                    next_token = logits[0, -1, self.cfg.d_normal_vocab:].argmax(-1).item() + self.cfg.d_normal_vocab
+                    tokens = t.cat((tokens, t.tensor([next_token], device=tokens.device)), dim=0)
+                    if tokens.shape[-1] >= self.cfg.seq_len: return tokens
+                next_token = logits[0, -1, :self.cfg.d_normal_vocab].argmax(-1).item()
+                tokens = t.cat((tokens, t.tensor([next_token], device=tokens.device)), dim=0)
         return tokens.squeeze()
     def seqStr(self, seq: t.Tensor) -> str:
         out = ""
@@ -77,8 +83,8 @@ class GPT2Thinking(nn.Module):
     def printSeq(self, seq: t.Tensor) -> None:
         print("\n", self.seqStr(seq))
 
-t.backends.cuda.enable_flash_sdp(enabled=True)
-t.set_default_device(t.device("cuda"))
+#t.backends.cuda.enable_flash_sdp(enabled=True)
+#t.set_default_device(t.device("cuda"))
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
@@ -108,7 +114,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
                 for s in range(seq_len - i - 1): # iterates over the string of thinking tokens the model produces
                     logits: t.Tensor = model(seq[:endices[i] + 1])
 
-                    next_token = logits[0, -1, model.cfg.d_normal_vocab:].argmax(-1).item() + model.cfg.d_normal_vocab # sampling only from thinking tokens
+                    next_token = logits[0, -1, model.cfg.d_normal_vocab:].argmax(-1).item() + model.cfg.d_normal_vocab - 1 # sampling only from thinking tokens
                     if i + s >= 126 or random.random() > 0.7: next_token = model.end_thought # artificially inflate prob of producing end thought token
                     #print(red, model.embed, blue, next_token, model.end_thought, endc)
 
@@ -125,8 +131,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
             # A single next token prediction consists of giving the model a sequence from the dataset, doing inference, producing thinking tokens, then producing an end_thought token.
             # The prediction on the end_thought sequence position is the real next token prediction.
             if b%100 == 0:
-                completion = model.yap(batch['text'][0])
-                completion_str = model.seqStr(full_seq)
+                completion = model.yap(batch['text'][0][:seq_len//2])
+                completion_str = model.seqStr(completion)
                 print("\n", completion_str)
                 completions_table.add_data(completion_str)
                 wandb.log({"sample_completions": completions_table})
