@@ -154,7 +154,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         
         # These are the models next-token logits and logprobs for each token in each sequence.
         ctx_logits = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
-        ctx_logprobs = logits.log_softmax(dim=-1)[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
+        #ctx_logprobs = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]].log_softmax(dim=-1)
+        ctx_logprobs = logits[seq_indices[:, None], seq_indices[None, :]].log_softmax(dim=-1)[..., ctx[:, 1:]]
 
         # The logit value at the end_thought token position corresponding to the true next token. We want to maximize these: the logit for the actual next token. These are our rewards.
         pred_logits = logits[seq_indices, endices.clone(), ctx[-1, 1:]]
@@ -162,23 +163,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         # normalize rewards across all the rollouts. The think token logprobs of the top half,
         # (in terms of logit on correct token on the end_thought position) are reinforced, the bottom half are pushed down.
         rewards = (pred_logits - logit_mean) / (logit_std + 1e-8)
-
-        # action logprobs times normalized rewards. we want to maximize this.
-        # strangely though, here the rewards are differentiable as well.
-
-        #print(cyan, logits[z, endices[z], real_nt], endc)
-        #print(lime, pred_logits, endc)
-        #print(red, seq_indices[:10], blue, endices[:10], green, ctx[-1, :10], endc)
-        #line(pred_logits.detach())
-        #imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
-        #imshow(ctx_logprobs, title=f"ctx_logprobs ({ctx_logprobs.shape})")
-        #imshow(ctx, title=f"tokens ({ctx.shape})")
-        #ctx_map = t.zeros_like(ctx)
-        #ctx_map[ctx > model.eot] = 1
-        #ctx_map[ctx < model.eot] = -1
-        #ctx_map[ctx == model.eot] = 0
-        #ctx_map[ctx == model.end_thought] = -2
-        #imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
 
         discounts = t.zeros_like(ctx_logits)
         for i in range(seq_len - 1):

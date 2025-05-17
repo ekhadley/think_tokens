@@ -16,3 +16,7 @@
 
     - take a pretrained model and just expand its embed/unembed with random stuff, then apply ther rl.
         - greatly mitigates issues with having to explore the very dense action space, hunting for the single correct next token.
+
+    - perhaps we try training on a synthetic dataset using an even smaller model.
+        - Compare a normal gpt2 style model to one with thinking tokens
+        - hopefully demonstrate the thinking model taking more steps on larger additions and acheiving perfect results, where the normal model is forced to approximate
