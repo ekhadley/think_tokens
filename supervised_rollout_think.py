@@ -86,7 +86,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
 
     model.train()
 
-    wandb.init(project="thoughtful", name="gpt2s_think", config=cfg)
+    wandb.init(project="thoughtful", name="gpt2s_supervised_rollout", config=cfg)
     wandb.watch(model, log="all")
     completions_table = wandb.Table(columns=['completion'])
     #wandb.log({"sample_completions": completions_table})
