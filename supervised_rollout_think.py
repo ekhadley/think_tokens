@@ -182,7 +182,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-        imshow(weighted_logprobs, title=f"weighted_logprobs ({weighted_logprobs.shape})")
+        #imshow(weighted_logprobs, title=f"weighted_logprobs ({weighted_logprobs.shape})")
         exit()
 
 if __name__ == "__main__":
