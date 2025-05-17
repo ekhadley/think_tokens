@@ -113,7 +113,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
                     if random.random() > 0.1: next_token = random.randint(model.cfg.d_normal_vocab, model.cfg.d_vocab_total) # artificially inflate prob of producing a thinking token
                     if i + s == 126 or random.random() > 0.7: next_token = model.end_thought # artificially inflate prob of producing end thought token
 
-                    print(pink, endices.shape, i, endc)
                     endices[i] = i + s + 1
                     seq[i + s + 1] = next_token
                 
