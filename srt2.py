@@ -40,7 +40,7 @@ class GPT2Thinking(nn.Module):
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
         self.eot = 50256
-        self.end_thought = cfg.d_vocab_total - 2
+        self.end_thought = cfg.d_vocab_total - 1
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     def encode(self, text):
@@ -138,10 +138,27 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         logits = model(ctx) # These are the model's logits (with gradients) on the ctx sequence.
         endices = endices.clone()
 
-        ctx_logprobs = logits[seq_indices[:, None], seq_indices[None, :]].log_softmax(dim=-1)[..., ctx[:, 1:]]
 
-        next_tok_logprobs = ctx_logprobs[seq_indices, endices]
+        last_tt = ctx[z, endices[z] - 1].detach().item()
+        print(purple, f"{last_tt=}", endc)
+        pred_nt = logits[z, endices[z]].argmax().detach().item()
+        real_nt = seq[z + 1].detach().item()
+        print(yellow, f"{logits.shape=}, {ctx.shape=}, {endices.shape=}, {seq.shape=}", endc)
+        print(pink, f"{endices[z]}", endc)
+        print(magenta, f"{ctx[z, endices[z]]=}", endc)
+        print(f"{purple}start: {z}, end: {endices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, endices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, endices[z]-1, real_nt]}{endc}")
 
+
+
+        #ctx_logprobs = logits[seq_indices[:, None], seq_indices[None, :]].log_softmax(dim=-1)[..., ctx[:, 1:]]
+        print(lime, logits.shape, endc)
+        ctx_logprobs = logits.log_softmax(dim=-1)[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
+
+
+        print(purple, ctx_logprobs.shape, green, seq_indices.max(), blue, endices.max(), endc)
+        next_tok_logprobs = ctx_logprobs[seq_indices, endices - 1]
+
+        print(magenta, next_tok_logprobs, endc)
         loss = next_tok_logprobs.mean()
         loss.backward()
         optimizer.step()
