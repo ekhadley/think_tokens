@@ -40,7 +40,7 @@ class GPT2Thinking(nn.Module):
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
         self.eot = 50256
-        self.end_thought = cfg.d_vocab_total - 2
+        self.end_thought = cfg.d_vocab_total - 1
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     def encode(self, text):
@@ -108,9 +108,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
                 for s in range(seq_len - i - 1): # iterates over the string of thinking tokens the model produces
                     logits: t.Tensor = model(seq[:endices[i] + 1])
 
-                    next_token = logits[0, -1, model.cfg.d_normal_vocab:model.cfg.d_vocab_total].argmax(-1) + model.cfg.d_normal_vocab - 1 # sampling only from thinking tokens
-                    if random.random() > 0.1: next_token = random.randint(model.cfg.d_normal_vocab, model.cfg.d_vocab_total) # artificially inflate prob of producing a thinking token
+                    next_token = logits[0, -1, model.cfg.d_normal_vocab:].argmax(-1).item() + model.cfg.d_normal_vocab # sampling only from thinking tokens
                     if i + s >= 126 or random.random() > 0.7: next_token = model.end_thought # artificially inflate prob of producing end thought token
+                    #print(red, model.embed, blue, next_token, model.end_thought, endc)
 
                     endices[i] = i + s + 1
                     seq[i + s + 1] = next_token
@@ -124,8 +124,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
             # This is the sequence which we will be attempting to do next token prediction on.
             # A single next token prediction consists of giving the model a sequence from the dataset, doing inference, producing thinking tokens, then producing an end_thought token.
             # The prediction on the end_thought sequence position is the real next token prediction.
-            model.printSeq(full_seq) 
-            
+            if b%100 == 0:
+                model.printSeq(full_seq)
+                t.save(model.state_dict(), f"{save_dir}/supervised_rollout_think{b}.pth") 
         # ctx holds all our tokens. We generate it withou gradients during the inference step, then clone it.
         # For a sequence of length s, we perform s rollouts. So each row of ctx is an input subsequence followed by a rollout, ending with the end_thought token.
         # ctx has s rows.
@@ -176,8 +177,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #imshow(discounts, title=f"discounts ({discounts.shape})")
 
         weighted_logprobs = ctx_logprobs * discounts
-        weighted_action_scores = weighted_logprobs * rewards.unsqueeze(1) 
-        loss = weighted_action_scores.mean()
+        weighted_action_scores = weighted_logprobs * rewards.unsqueeze(1)
+        loss = weighted_action_scores.sum()
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -186,12 +187,12 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
 
         wandb.log({"reward_mean": logit_mean})
         wandb.log({"reward_std": logit_std})
-        wandb.log({"think_tok_prop": (endices-seq_indices).sum()/seq_len})
+        wandb.log({"think_tok_prop": (think_tok_prop:=(seq_len/((endices-seq_indices).sum().detach().item())))})
         wandb.log({"weighted_token_logits": loss.detach().item()})
-        tr.set_description(f"{magenta}reward_mean: {logit_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}")
+        tr.set_description(f"{magenta}reward_mean: {logit_mean.detach().item():.3f}, loss: {loss.detach().item():.3f}, %think: {think_tok_prop:.3f}")
 
 if __name__ == "__main__":
-    model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=4, n_layers=4, d_normal_vocab=50257, d_thought_vocab=2048)
+    model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=2, n_layers=2, d_normal_vocab=50257, d_thought_vocab=2048)
     training_cfg = TrainingConfig(gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 

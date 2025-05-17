@@ -52,7 +52,7 @@ class ThinkingModelConfig:
             d_mlp:int = 2048,
             d_head:int = 64,
             n_heads:int = 8,
-            n_layers:int = 6,
+            n_layers:int = 8,
             d_normal_vocab:int = 50257,
             d_thought_vocab:int = 50257,
         ):
@@ -64,7 +64,7 @@ class ThinkingModelConfig:
         self.n_layers = n_layers
         self.d_normal_vocab = d_normal_vocab
         self.d_thought_vocab = d_thought_vocab
-        self.d_vocab_total = d_normal_vocab + d_thought_vocab + 1
+        self.d_vocab_total = d_normal_vocab + d_thought_vocab
 
 class TrainingConfig:
     def __init__(

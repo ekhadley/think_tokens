@@ -55,8 +55,8 @@ class GPT2Thinking(nn.Module):
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False) # -1 because we don't want to predict <pad>
-
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
+
     def encode(self, text):
         return t.tensor(self.tokenizer(text).input_ids)
     def decode(self, tokens):
