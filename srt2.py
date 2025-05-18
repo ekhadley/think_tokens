@@ -101,7 +101,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
     lower_mask = t.tril(t.ones((seq_len - 1, seq_len - 1)), diagonal=-1).bool()
 
     dl = t.utils.data.DataLoader(dataset, batch_size=1)
-    #dl = t.utils.data.DataLoader(dataset, batch_size=16)
     for b, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
         with t.inference_mode():
             model.eval()
@@ -126,7 +125,12 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
                 
                 ctx[i] = seq
             
-            model.printSeq(full_seq)
+            if b%100 == 0:
+                completion = model.yap(batch['text'][0][:seq_len//2])
+                completion_str = model.seqStr(completion)
+                print("\n", completion_str)
+                completions_table.add_data(completion_str)
+
         ctx = ctx.clone()
         logits = model(ctx) # These are the model's logits (with gradients) on the ctx sequence.
         endices = endices.clone()
@@ -148,26 +152,33 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
         #print(f"{purple}start: {z}, end: {endices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, endices[z], pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, endices[z], real_nt]}{endc}")
         #print(blue, logits.shape, green, ctx.shape, endc)
 
-        #ctx_logits = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
-        #imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
-        #ctx_logprobs = logits.log_softmax(dim=-1)[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
-        #imshow(ctx_logprobs, title=f"ctx_logprobs ({ctx_logprobs.shape})")
 
         #next_tok_logits = logits[seq_indices, endices, ctx[-1, 1:]]
         next_tok_logprobs = logits[seq_indices, endices].log_softmax(dim=-1)[seq_indices, ctx[-1, 1:]]
         #print(purple, next_tok_logprobs.shape, endc)
         #line(next_tok_logprobs.detach())
 
-        loss = next_tok_logprobs.mean()
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+        #ctx_logits = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
+        #think_mask = (ctx >= model.cfg.d_normal_vocab) * (ctx < model.end_thought)
+        #ctx_logprobs = logits.log_softmax(dim=-1)[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
+        #think_logprobs = ctx_logprobs * think_mask
+        #imshow(think_logprobs, title=f"ctx_logprobs ({ctx_logprobs.shape})")
 
-        tr.set_description(f"{magenta}loss: {loss.detach().item():.3f} ")
+
+
+        loss = next_tok_logprobs.mean()
+        loss = loss / training_cfg.batch_size
+        loss.backward()
+
+        if b != 0 and b%training_cfg.batch_size == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+            tr.set_description(f"{magenta}loss: {loss.detach().item()*training_cfg.batch_size:.3f} ")
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=128, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
-    training_cfg = TrainingConfig(gamma=0.95, batch_size=8, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, training_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-128", 0.07, pad=False)
