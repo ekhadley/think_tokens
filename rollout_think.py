@@ -9,6 +9,7 @@ from transformers import GPT2TokenizerFast, AutoTokenizer
 from eindex import eindex
 
 from utils import *
+from normal import TransformerBlock
 
 def loadReferenceModel(model_name: str) -> AutoModelForCausalLM:
     bnb_config = BitsAndBytesConfig(
@@ -25,26 +26,6 @@ def loadReferenceModel(model_name: str) -> AutoModelForCausalLM:
     )
     model.eval()
     return model
-
-class TransformerBlock(nn.Module):
-    def __init__(self, cfg: ModelConfig):
-        super(TransformerBlock, self).__init__()
-        self.attn = nn.MultiheadAttention(cfg.d_model, cfg.n_heads, batch_first=True)
-        self.norm1 = nn.LayerNorm(cfg.d_model)
-        self.linear1 = nn.Linear(cfg.d_model, cfg.d_mlp)
-        self.act = nn.ReLU()
-        self.linear2 = nn.Linear(cfg.d_mlp, cfg.d_model)
-        self.norm2 = nn.LayerNorm(cfg.d_model)
-    
-    def forward(self, x: t.Tensor) -> t.Tensor:
-        if x.ndim == 2: x = x.unsqueeze(0)
-        seq_len = x.shape[1]
-        attn_mask = t.triu(t.ones((seq_len, seq_len)), diagonal=1).bool()
-        attn_output, _ = self.attn(x, x, x, is_causal=True, attn_mask=attn_mask)
-        x = self.norm1(x + attn_output)
-        ff_output = self.linear2(self.act(self.linear1(x)))
-        x = self.norm2(x + ff_output)
-        return x
 
 class GPT2Thinking(nn.Module):
     def __init__(self, cfg: ModelConfig):
@@ -112,7 +93,7 @@ t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
 t.autocast(device_type="cuda", enabled=True, dtype=t.float16)
 
-def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
+def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True) # maximize = True for reward
     sample_completion_prompt = "George Washington was"
 
@@ -174,7 +155,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
                 wandb.log({"sample_completions": completions_table})
                 print()
                 model.printSeq(seq[0])
-                t.save(model.state_dict(), f"{save_dir}/rollout_think{b}.pth")
+                t.save(model.state_dict(), f"saves/rollout_think{b}.pth")
 
         seq = seq.clone()
         discounted_rewards = discounted_rewards.clone()
@@ -203,7 +184,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset, save_dir: str):
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
-    training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, epochs=1, warmup_steps=1000, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
     #import normal
     #normal_model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)

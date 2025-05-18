@@ -71,8 +71,6 @@ class TrainingConfig:
             self,
             batch_size:int = 32,
             lr:float = 3e-4,
-            epochs:int = 1,
-            warmup_steps:int = 1000,
             weight_decay:float = 1e-1,
             adam_beta1:float = 0.9,
             adam_beta2:float = 0.95,
@@ -80,8 +78,6 @@ class TrainingConfig:
         ):
         self.batch_size = batch_size
         self.lr = lr
-        self.epochs = epochs
-        self.warmup_steps = warmup_steps
         self.weight_decay = weight_decay
         self.adam_beta1 = adam_beta1
         self.adam_beta2 = adam_beta2
