@@ -126,39 +126,38 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset, s
                 
                 ctx[i] = seq
             
-            if b%100 == 0:
-                completion = model.yap(batch['text'][0][:seq_len//2])
-                completion_str = model.seqStr(completion)
-                print("\n", completion_str)
-                completions_table.add_data(completion_str)
-                wandb.log({"sample_completions": completions_table})
-                t.save(model.state_dict(), f"{save_dir}/supervised_rollout_think{b}.pth") 
-
+            model.printSeq(full_seq)
         ctx = ctx.clone()
         logits = model(ctx) # These are the model's logits (with gradients) on the ctx sequence.
         endices = endices.clone()
 
+        #ctx_map = t.zeros_like(ctx)
+        #ctx_map[ctx > model.eot] = 1
+        #ctx_map[ctx < model.eot] = -1
+        #ctx_map[ctx == model.eot] = 0
+        #ctx_map[ctx == model.end_thought] = -2
+        #imshow(ctx_map, title=f"ctx_map ({ctx_map.shape})")
+        #z = 0
+        #last_tt = ctx[z, endices[z] - 1].detach().item()
+        #print(purple, f"{last_tt=}", endc)
+        #pred_nt = logits[z, endices[z]].argmax().detach().item()
+        #real_nt = seq[z + 1].detach().item()
+        #print(yellow, f"{logits.shape=}, {ctx.shape=}, {endices.shape=}, {seq.shape=}", endc)
+        #print(pink, f"{endices[z]}", endc)
+        #print(magenta, f"{ctx[z, endices[z]]=}", endc)
+        #print(f"{purple}start: {z}, end: {endices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, endices[z], pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, endices[z], real_nt]}{endc}")
+        #print(blue, logits.shape, green, ctx.shape, endc)
 
-        last_tt = ctx[z, endices[z] - 1].detach().item()
-        print(purple, f"{last_tt=}", endc)
-        pred_nt = logits[z, endices[z]].argmax().detach().item()
-        real_nt = seq[z + 1].detach().item()
-        print(yellow, f"{logits.shape=}, {ctx.shape=}, {endices.shape=}, {seq.shape=}", endc)
-        print(pink, f"{endices[z]}", endc)
-        print(magenta, f"{ctx[z, endices[z]]=}", endc)
-        print(f"{purple}start: {z}, end: {endices[z]}, predicted real tok: {pred_nt}('{model.tokenizer.decode(pred_nt)}') with logit {logits[z, endices[z] - 1, pred_nt]}, real next tok: {real_nt}('{model.tokenizer.decode(real_nt)}'), logit on real next tok: {logits[z, endices[z]-1, real_nt]}{endc}")
+        #ctx_logits = logits[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
+        #imshow(ctx_logits, title=f"ctx_logits ({ctx_logits.shape})")
+        #ctx_logprobs = logits.log_softmax(dim=-1)[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
+        #imshow(ctx_logprobs, title=f"ctx_logprobs ({ctx_logprobs.shape})")
 
+        #next_tok_logits = logits[seq_indices, endices, ctx[-1, 1:]]
+        next_tok_logprobs = logits[seq_indices, endices].log_softmax(dim=-1)[seq_indices, ctx[-1, 1:]]
+        #print(purple, next_tok_logprobs.shape, endc)
+        #line(next_tok_logprobs.detach())
 
-
-        #ctx_logprobs = logits[seq_indices[:, None], seq_indices[None, :]].log_softmax(dim=-1)[..., ctx[:, 1:]]
-        print(lime, logits.shape, endc)
-        ctx_logprobs = logits.log_softmax(dim=-1)[seq_indices[:, None], seq_indices[None, :], ctx[:, 1:]]
-
-
-        print(purple, ctx_logprobs.shape, green, seq_indices.max(), blue, endices.max(), endc)
-        next_tok_logprobs = ctx_logprobs[seq_indices, endices - 1]
-
-        print(magenta, next_tok_logprobs, endc)
         loss = next_tok_logprobs.mean()
         loss.backward()
         optimizer.step()
