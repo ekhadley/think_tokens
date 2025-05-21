@@ -62,8 +62,6 @@ class GPT2(nn.Module):
                 tokens = t.cat([tokens, next_token], dim=-1)
         return "".join(self.tokenizer.batch_decode(tokens))
 
-t.backends.cuda.enable_flash_sdp(enabled=True)
-t.set_default_device(t.device("cuda"))
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
@@ -100,11 +98,13 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
             t.save(model.state_dict(), f"saves/normal{i}.pth")
 
 if __name__ == "__main__":
+    t.set_default_device(t.device("cuda"))
+
     model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
     model = GPT2(model_cfg)
-    training_cfg = TrainingConfig(batch_size=16, lr=3e-4, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(batch_size=16, lr=3e-4, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
     dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
     
-    train(model, training_cfg, dataset, "./saves")
+    train(model, training_cfg, dataset)

@@ -62,7 +62,6 @@ class GPT2Thinking(nn.Module):
     def printSeq(self, seq: t.Tensor) -> None:
         print("\n", self.seqStr(seq))
 
-t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset):
@@ -93,7 +92,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset):
                 for s in range(seq_len - i - 1): # iterates over the string of thinking tokens the model produces
                     logits: t.Tensor = model(seq[:endices[i] + 1])
 
-                    next_token = logits[0, -1, model.cfg.d_normal_vocab:].argmax(-1).item() + model.cfg.d_normal_vocab - 1 # sampling only from thinking tokens
+                    next_token = logits[0, -1, model.cfg.d_normal_vocab:].argmax(-1).item() + model.cfg.d_normal_vocab # sampling only from thinking tokens
                     if i + s >= 126 or random.random() > 0.7: next_token = model.end_thought # artificially inflate prob of producing end thought token
                     #print(red, model.embed, blue, next_token, model.end_thought, endc)
 

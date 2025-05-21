@@ -89,7 +89,6 @@ def apply_repetition_penalty_batch(logits: t.Tensor, generated: list[list[int]],
         )
     return logits
 
-t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
 t.autocast(device_type="cuda", enabled=True, dtype=t.float16)
 
@@ -184,7 +183,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
 
 if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_normal_vocab=50257, d_thought_vocab=2048)
-    training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, weight_decay=1e-2, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
     #import normal
     #normal_model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)

@@ -24,6 +24,7 @@ bold = '\033[1m'
 underline = '\033[4m'
 endc = '\033[0m'
 
+t.backends.cuda.enable_flash_sdp(enabled=True)
 
 class ModelConfig:
     def __init__(
@@ -98,6 +99,21 @@ def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top
         indices_to_remove = sorted_indices[sorted_indices_to_remove]
         logits[indices_to_remove] = -float('Inf')
     probs = F.softmax(logits, dim=-1)
+    return t.multinomial(probs, num_samples=1)
+def sampleLogprobs(logprobs: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
+    logprobs = logprobs.squeeze() / temperature
+    if top_k > 0:
+        indices_to_remove = logprobs < t.topk(logprobs, top_k)[0][..., -1, None]
+        logprobs[indices_to_remove] = -float('Inf')
+    if 0 < top_p < 1:
+        sorted_logits, sorted_indices = t.sort(logprobs, descending=True)
+        cumulative_probs = t.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+        sorted_indices_to_remove = cumulative_probs > top_p
+        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+        sorted_indices_to_remove[..., 0] = 0
+        indices_to_remove = sorted_indices[sorted_indices_to_remove]
+        logprobs[indices_to_remove] = -float('Inf')
+    probs = F.softmax(logprobs, dim=-1)
     return t.multinomial(probs, num_samples=1)
 
 def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg: ModelConfig, dataset_title, dataset_name, save_name: str, fraction: float = 1.0, pad=False):

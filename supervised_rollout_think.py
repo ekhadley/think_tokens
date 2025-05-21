@@ -20,7 +20,7 @@ class GPT2Thinking(nn.Module):
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
         self.eot = 50256
-        self.end_thought = cfg.d_vocab_total - 2
+        self.end_thought = cfg.d_vocab_total - 1
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     def encode(self, text):
@@ -29,7 +29,7 @@ class GPT2Thinking(nn.Module):
         return self.tokenizer.batch_decode(tokens)
     def forward(self, x: t.Tensor) -> t.Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
-        x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
+        x = self.embed(x) + self.pos_embed(t.arange(x.shape[1])).unsqueeze(0)
         for i, block in enumerate(self.blocks):
             x = block(x)
         x = self.ln_f(x)
@@ -62,7 +62,6 @@ class GPT2Thinking(nn.Module):
     def printSeq(self, seq: t.Tensor) -> None:
         print("\n", self.seqStr(seq))
 
-t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_default_device(t.device("cuda"))
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset):
@@ -93,7 +92,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset):
                 for s in range(seq_len - i - 1): # iterates over the string of thinking tokens the model produces
                     logits: t.Tensor = model(seq[:endices[i] + 1])
 
-                    next_token = logits[0, -1, model.cfg.d_normal_vocab:].argmax(-1).item() + model.cfg.d_normal_vocab - 1 # sampling only from thinking tokens
+                    next_token = logits[0, -1, model.cfg.d_normal_vocab:].argmax(-1).item() + model.cfg.d_normal_vocab # sampling only from thinking tokens
                     if i + s >= 126 or random.random() > 0.7: next_token = model.end_thought # artificially inflate prob of producing end thought token
                     #print(red, model.embed, blue, next_token, model.end_thought, endc)
 
@@ -154,10 +153,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset):
         weighted_action_scores = weighted_logprobs * rewards.unsqueeze(1)
         loss = weighted_action_scores.sum()
         loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-        #imshow(weighted_logprobs, title=f"weighted_logprobs ({weighted_logprobs.shape})")
-        #exit()
+        if b != 0 and b % cfg.batch_size == 0:
+            optimizer.step()
+            optimizer.zero_grad()
 
         wandb.log({"reward_mean": logit_mean})
         wandb.log({"reward_std": logit_std})
