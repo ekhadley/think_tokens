@@ -190,7 +190,7 @@ if __name__ == "__main__":
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, weight_decay=1e-6, adam_beta1=0.9, adam_beta2=0.95)
 
-    trainset, testset = makeAdditionDataset(simple_tokenizer, 1_00, 50_000, "additions_1K_100K", train_split=0.9)
+    trainset, testset = makeAdditionDataset(simple_tokenizer, 100, 10_000, "additions_1K_100K", train_split=0.9)
     #dataset = pd.read_pickle("datasets/simple_additions_10K_100K.pkl")
 
     train(model, training_cfg, trainset)
