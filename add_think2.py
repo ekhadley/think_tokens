@@ -7,67 +7,68 @@ from torch import nn
 from transformers import GPT2TokenizerFast, AutoTokenizer
 import random
 import pandas as pd
+import numpy as np
 from eindex import eindex
 
+from normal import GPT2
 from supervised_rollout_think import GPT2Thinking
-from add_normal import makeAdditionDataset, SimpleTokenizer
+from add_normal2 import SimpleTokenizer, makeAdditionDataset
 from utils import *
 
-simple_tokenizer = SimpleTokenizer()
-
-def printSeq(seq: t.Tensor, cfg: ThinkingModelConfig) -> None:
+def printSeq(seq: t.Tensor, tokenizer, cfg: ThinkingModelConfig) -> None:
     seq = seq.squeeze()
     print()
     for token in seq:
         if token < cfg.d_normal_vocab:
-            print(blue, simple_tokenizer.vocab[token], endc, end="", sep="")
+            print(blue, tokenizer.id_to_token[token.item()], endc, end="", sep="")
         elif token == cfg.d_vocab_total - 1:
             print(magenta, "<end_thought>", endc, end="", sep="")
         else:
             print(cyan, f"<think{token.item() - cfg.d_normal_vocab}>", endc, end="", sep="")
     print()
 
-
 def benchmark_addition_think(model: GPT2Thinking, dataset: pd.DataFrame, max_answer_len: int = 10, group_size: int = 1):
     """
     Benchmarks the thinking model's addition ability on a dataset.
-    For each question, generates a rollout by sampling thinking tokens, then appends the answer tokens.
+    For each question, generates a rollout by sampling thinking tokens, then predicts the single answer token.
     Returns:
-        - mean_logprob: mean aggregate logprob over correct answer tokens
+        - mean_logprob: mean logprob over correct answer tokens
         - accuracy: fraction of exact matches using argmax sampling
     """
     model.eval()
+    prob_force_end_thought = 0.1
     total_logprob = 0.0
     total_tokens = 0
     correct = 0
     n = len(dataset)
     for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=n, desc="BenchmarkThink", ncols=100):
         q_toks = t.tensor(row.question_toks)
-        ans_toks = t.tensor(row.answer_toks)
+        ans_tok = row.answer_tok  # Single token
         q_len = row.question_len
-        a_len = row.answer_len
 
         # Generate rollout (simulate thinking)
         rollout = q_toks.clone()
         with t.no_grad():
-            for i in range(q_len, model.cfg.seq_len - a_len):
+            for i in range(q_len, model.cfg.seq_len - 1):  # Reserve 1 position for answer
                 logits = model(rollout).squeeze()
                 logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1)
-                if i == model.cfg.seq_len - a_len - 1 or random.random() < 1.0: think_tok = t.tensor(model.end_thought).reshape(1, 1)
-                #if i == model.cfg.seq_len - a_len - 1: think_tok = model.end_thought
-                else: think_tok = logprobs[-1].argmax().item() + model.cfg.d_normal_vocab
+                if i == model.cfg.seq_len - 2 or random.random() < prob_force_end_thought: 
+                    think_tok = model.end_thought
+                else: 
+                    think_tok = logprobs[-1].argmax().item() + model.cfg.d_normal_vocab
                 rollout = t.cat([rollout, t.tensor([think_tok], device=rollout.device)])
                 if think_tok == model.end_thought: break
-            rollout = t.cat([rollout, ans_toks], dim=0)
+            
+            # Predict answer token
             logits = model(rollout).squeeze()
             logprobs = t.log_softmax(logits[..., :model.cfg.d_normal_vocab], dim=-1)
-            rollout_len = rollout.shape[0]
-            ans_logprobs = logprobs[range(rollout_len - a_len - 1, rollout_len - 1), rollout[rollout_len - a_len:]]
-            total_logprob += ans_logprobs.sum().item()
-            total_tokens += a_len
-            answer_logits = logits[rollout_len - a_len - 1: rollout_len - 1, :model.cfg.d_normal_vocab]
-            generated = answer_logits.argmax(dim=-1).cpu().tolist()
-            if generated == ans_toks.cpu().tolist():
+            ans_logprob = logprobs[-1, ans_tok]
+            total_logprob += ans_logprob.item()
+            total_tokens += 1
+            
+            answer_logit = logits[-1, :model.cfg.d_normal_vocab]
+            generated = answer_logit.argmax().item()
+            if generated == ans_tok:
                 correct += 1
     mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
     accuracy = correct / n if n > 0 else float('nan')
@@ -78,45 +79,49 @@ def benchmark_addition_think(model: GPT2Thinking, dataset: pd.DataFrame, max_ans
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
 
-    wandb.init(project="add_thoughtful_think", name="think_nothink", config=cfg)
+    input_max = dataset.attrs["input_max"]
+    wandb.init(project="add_thoughtful_think", name=f"think_eps_{input_max}", config=cfg)
     wandb.watch(model, log="all")
 
-    group_size = 1
-    think_reward_weight = 0.5
+    group_size = 16
+    think_reward_weight = 0.9
     entropy_reward_weight = 0.0
 
-    epsilon = 1.0
-    eps_decay = 1.0
+    sample_temp = 1.0
+
+    prob_force_end_thought = 0.05
+    epsilon = 1.0 # prob of choosing random think token
+    eps_decay = 0.99999
     eps_min = 0.0
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
         row = dataset.iloc[b]
         q_toks = t.tensor(row["question_toks"])
-        ans_toks = t.tensor(row["answer_toks"])
+        ans_tok = row["answer_tok"]  # Single token, not tensor
         q_len = row["question_len"]
-        a_len = row["answer_len"]
 
         rollouts, pred_rewards = [], []
         with t.inference_mode(): # do inference without gradients to generate rollouts
             for g in range(group_size): # for each rollout in the group
                 rollout = q_toks.clone()
-                max_think_idx = model.cfg.seq_len - a_len
+                max_think_idx = model.cfg.seq_len - 1  # Reserve 1 position for answer prediction
                 for i in range(q_len, max_think_idx): # for each think token in the rollout
                     logits = model(rollout).squeeze()
-                    logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1) # get logpprob distn over thinking tokens
-                    think_tok = sampleLogprobs(logprobs[..., -1, :], temperature=1.0).reshape(1, 1) + model.cfg.d_normal_vocab # sample a thinking token
-                    print(lime, logprobs[..., -1, think_tok-model.cfg.d_normal_vocab], endc)
-                    if i == max_think_idx - 1 or random.random() < epsilon: think_tok = t.tensor(model.end_thought).reshape(1, 1)
-                    rollout = t.cat([rollout.unsqueeze(1), think_tok], dim=0).squeeze() #
-                    if think_tok == model.end_thought: # end of thinking. get logprobs on answer (reward)
+                    sample_probs = t.softmax((logits/sample_temp)[..., model.cfg.d_normal_vocab:], dim=-1) # get logpprob distn over thinking tokens
+                    think_tok = t.multinomial(sample_probs[..., 1, :], num_samples=1) + model.cfg.d_normal_vocab # sample a thinking token
+                    #think_tok = sampleLogprobs(logprobs[..., -1, :], temperature=1.0) + model.cfg.d_normal_vocab # sample a thinking token
+                    if random.random() < epsilon:
+                        think_tok = t.tensor([random.randint(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1)])
+                    if i == max_think_idx - 1 or random.random() < prob_force_end_thought: 
+                        think_tok = t.tensor([model.end_thought])
+                    rollout = t.cat([rollout, think_tok])
+                    if think_tok.item() == model.end_thought: # end of thinking. get logprobs on answer (reward)
                         break
 
-                rollout = t.cat([rollout, ans_toks], dim=0) # append the answer tokens
                 logits = model(rollout).squeeze()
                 logprobs = t.log_softmax(logits[..., :model.cfg.d_normal_vocab], dim=-1) # get the logprobs of the answer tokens
-                rollout_len = rollout.shape[0]
-                ans_logprobs = logprobs[range(rollout_len - a_len - 1, rollout_len - 1), rollout[rollout_len - a_len:]] # get the logprobs of the answer tokens
-                reward = ans_logprobs.sum() # reward is the logprob on correct answer tokens
+                ans_logprob = logprobs[-1, ans_tok]  # ans_tok is the single token ID
+                reward = ans_logprob # reward is the logprob on correct answer token
 
                 pred_rewards.append(reward.cpu().item())
                 rollouts.append(rollout)
@@ -133,7 +138,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         normed_pred_probs = [p - pred_prob_mean for p in pred_probs]
         pred_prob_var = sum([p**2 for p in normed_pred_probs]) / len(normed_pred_probs)
 
-        num_think_per_rollout = [rollouts[i].shape[0] - q_len - a_len for i in range(group_size)]
+        num_think_per_rollout = [rollouts[i].shape[0] - q_len for i in range(group_size)]  # no answer tokens appended
         mean_num_think = sum(num_think_per_rollout) / len(num_think_per_rollout)
 
         total_rewards, think_rewards, entropy_rewards = [], [], []
@@ -142,19 +147,17 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             logits = model(rollout).squeeze()
             rollout_len = rollout.shape[0]
 
+            # For single-token answers, calculate reward directly from the last position
             ans_logprobs = t.log_softmax(logits[..., :model.cfg.d_normal_vocab], dim=-1)
-            ans_indices = list(range(rollout_len - a_len - 1, rollout_len - 1))
-            ans_logprobs = ans_logprobs[ans_indices, rollout[rollout_len - a_len:]] # get the logprob values for the true answer tokens
-            pred_reward = ans_logprobs.sum()
+            pred_reward = ans_logprobs[-1, ans_tok]  # logprob of correct answer token at last position
 
             think_logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1) # get the logprob distns of the positions which were thinking tokens
-            think_indices = list(range(q_len - 1, rollout_len - a_len - 1))
-            think_logprobs_sel = think_logprobs[think_indices, rollout[q_len: rollout_len - a_len] - model.cfg.d_normal_vocab] # get the logprob values of the thinking tokens that were outputted
-            print(cyan, think_logprobs_sel, endc)
+            think_indices = list(range(q_len - 1, rollout_len - 1))  # thinking tokens go from after question to end of rollout
+            
+            think_logprobs_sel = think_logprobs[think_indices, rollout[q_len:rollout_len] - model.cfg.d_normal_vocab] # get the logprob values of the thinking tokens that were outputted
             weighted_think_logprobs = think_logprobs_sel * normed_pred_rewards[g] # weight the logprobs by the mean centered reward
             think_reward = weighted_think_logprobs.sum()
 
-            ## Entropy regularization for think token outputs
             think_logprobs_all = think_logprobs[think_indices] # shape: (num_think_steps, d_thought_vocab)
             entropy = -(think_logprobs_all.exp() * think_logprobs_all).sum(dim=-1) # shape: (num_think_steps,)
             entropy_reward = entropy.mean() # average over think steps
@@ -173,6 +176,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         if b != 0 and b % cfg.batch_size == 0:
             opt.step()
             opt.zero_grad()
+
             wandb.log({
                 "pred_reward": pred_reward_mean,
                 "think_reward": think_reward_mean,
@@ -181,24 +185,28 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "entropy_reward": entropy_reward_mean,
                 "pred_reward_var": pred_reward_var,
                 "pred_prob_var": pred_prob_var,
+                "prob_force_end_thought": prob_force_end_thought,
                 "epsilon": epsilon,
             })
-            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, entropy: {entropy_reward_mean:.3f}, num_think: {mean_num_think:.3f}")
-            #printSeq(rollouts[0], model.cfg)
+            #printSeq(rollouts[0], simple_tokenizer, model.cfg)
+            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, entropy: {entropy_reward_mean:.3f}, epsilon: {epsilon:.3f}, num_think: {mean_num_think:.3f}")
 
+        if b != 0 and b % 1000 == 0:
+            t.save(model.state_dict(), f"saves/add_think2_{b}.pt")
 
-NUM_MAX = 100
+INPUT_MAX = 10
 NUM_EXAMPLES = 100_000
+
+NUM_MAX = INPUT_MAX * 2
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
 
-    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=12, d_thought_vocab=100)
-    training_cfg = TrainingConfig(batch_size=16, lr=2e-3, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
+    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=4, d_normal_vocab=NUM_MAX + 3, d_thought_vocab=100)
+    training_cfg = TrainingConfig(batch_size=16, lr=3e-3, weight_decay=1e-6, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
-    trainset, testset = makeAdditionDataset(simple_tokenizer, NUM_MAX, NUM_EXAMPLES, train_split=0.99)
-    #dataset = pd.read_pickle("datasets/additions_10_1M.pkl")
+    simple_tokenizer = SimpleTokenizer(max_int=NUM_MAX)
+    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
     train(model, training_cfg, trainset)
-
     benchmark_addition_think(model, testset)
