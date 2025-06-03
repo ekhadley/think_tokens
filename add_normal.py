@@ -10,34 +10,46 @@ from eindex import eindex
 from normal import GPT2
 from utils import *
 
-# Custom tokenizer for digits 0-9, '+', '='
-
 class SimpleTokenizer:
-    def __init__(self):
-        self.vocab = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '=']
-        self.token_to_id = {ch: i for i, ch in enumerate(self.vocab)}
-        self.id_to_token = {i: ch for i, ch in enumerate(self.vocab)}
+    def __init__(self, max_int):
+        # Create vocabulary: integers 0 to max_int, then '+' and '='
+        self.vocab = [str(i) for i in range(max_int)] + ['+', '=']
+        self.token_to_id = {token: i for i, token in enumerate(self.vocab)}
+        self.id_to_token = {i: token for i, token in enumerate(self.vocab)}
+        self.max_int = max_int
+        self.plus_token_id = len(self.vocab) - 2
+        self.equals_token_id = len(self.vocab) - 1
+    
     def encode(self, s):
-        return [self.token_to_id[ch] for ch in s]
+        tokens = []
+        i = 0
+        while i < len(s):
+            if s[i] == '+':
+                tokens.append(self.plus_token_id)
+                i += 1
+            elif s[i] == '=':
+                tokens.append(self.equals_token_id)
+                i += 1
+            else:
+                num_str = ''
+                while i < len(s) and s[i].isdigit():
+                    num_str += s[i]
+                    i += 1
+                tokens.append(int(num_str))
+        return tokens
+
     def decode(self, ids):
         return ''.join([self.id_to_token[i] for i in ids])
 
-# Use this tokenizer everywhere
-simple_tokenizer = SimpleTokenizer()
 
 def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.0):
     question_str = []
     answer_str = []
     question_toks = []
-    answer_toks = []
-    question_str_toks = []
-    question_len = []
-    answer_len = []
-    seq_lens = []
-    full_seqs = []
+    answer_tok = []  # Single token, not a list
 
     # Calculate all possible unique questions
-    all_questions = [f"{n1}+{n2}=" for n1 in range(int_max+1) for n2 in range(int_max+1)]
+    all_questions = [f"{n1}+{n2}=" for n1 in range(int_max) for n2 in range(int_max)]
     random.shuffle(all_questions)
     n_unique = len(all_questions)
     crowded = n_questions > n_unique
@@ -65,19 +77,14 @@ def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.
     def add_examples(questions):
         for question in questions:
             n1, n2 = map(int, question[:-1].split('+'))
-            answer = str(n1 + n2)
+            answer = str((n1 + n2)%int_max)
+            #answer = str(n1 + n2)
             toks = np.array(tokenizer.encode(question))
-            ans_toks = np.array(tokenizer.encode(answer))
-            full_seq = np.concatenate([toks, ans_toks])
+            ans_tok = tokenizer.encode(answer)[0]  # Single token
             question_str.append(question)
             answer_str.append(answer)
             question_toks.append(toks)
-            answer_toks.append(ans_toks)
-            question_str_toks.append(tokenizer.decode(toks) + tokenizer.decode(ans_toks))
-            question_len.append(len(toks))
-            answer_len.append(len(ans_toks))
-            full_seqs.append(full_seq)
-            seq_lens.append(len(full_seq))
+            answer_tok.append(ans_tok)
 
     # Add training and test examples
     add_examples(train_questions)
@@ -85,30 +92,24 @@ def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.
         "question": question_str,
         "answer": answer_str,
         "question_toks": question_toks,
-        "answer_toks": answer_toks,
-        "question_str_toks": question_str_toks,
-        "question_len": question_len,
-        "answer_len": answer_len,
-        "full_seq": full_seqs,
-        "seq_len": seq_lens
+        "answer_tok": answer_tok,
     })
+    train_dataset.attrs['n_examples'] = n_questions
+    train_dataset.attrs['input_max'] = int_max
+    train_dataset.attrs['question_len'] = len(train_questions[0]) if train_questions else 0
     if n_test > 0:
         # Clear lists and add test examples
-        question_str.clear(); answer_str.clear(); question_toks.clear(); answer_toks.clear()
-        question_str_toks.clear(); question_len.clear(); answer_len.clear(); full_seqs.clear(); seq_lens.clear()
+        question_str.clear(); answer_str.clear(); question_toks.clear(); answer_tok.clear()
         add_examples(test_questions)
         test_dataset = pd.DataFrame({
             "question": question_str,
             "answer": answer_str,
             "question_toks": question_toks,
-            "answer_toks": answer_toks,
-            "question_str_toks": question_str_toks,
-            "question_len": question_len,
-            "answer_len": answer_len,
-            "full_seq": full_seqs,
-            "seq_len": seq_lens
+            "answer_tok": answer_tok,
         })
-        # Do not save train and test to their own files
+        test_dataset.attrs['n_examples'] = n_questions
+        test_dataset.attrs['input_max'] = int_max
+        test_dataset.attrs['question_len'] = len(test_questions[0]) if test_questions else 0
         return train_dataset, test_dataset
     else:
         train_dataset.to_pickle(f"datasets/additions_{int_max}_{n_questions}.pkl")
@@ -118,7 +119,7 @@ def benchmark_addition(model: GPT2, dataset: pd.DataFrame, max_answer_len: int =
     """
     Benchmarks the model's addition ability on a dataset.
     Returns:
-        - mean_logprob: mean aggregate logprob over correct answer tokens
+        - mean_logprob: mean logprob over correct answer tokens
         - accuracy: fraction of exact matches using argmax sampling
     """
     model.eval()
@@ -126,33 +127,31 @@ def benchmark_addition(model: GPT2, dataset: pd.DataFrame, max_answer_len: int =
     total_tokens = 0
     correct = 0
     n = len(dataset)
+    q_len = dataset.attrs['question_len']
     for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=n, desc="Benchmark", ncols=100):
-        seq = t.tensor(row.full_seq).to(model.parameters().__next__().device)
-        q_len = row.question_len
-        a_len = row.answer_len
+        q_toks = t.tensor(row.question_toks)
+        ans_tok = row.answer_tok  # Single token
+        
+        # Create full sequence by concatenating question and answer
+        full_seq = t.cat([q_toks, t.tensor([ans_tok], device=q_toks.device)])
+        
         # Get logits for the full sequence
         with t.no_grad():
-            logits = model(seq).squeeze(0)  # [seq_len, vocab]
+            logits = model(full_seq).squeeze(0)  # [seq_len, vocab]
             logprobs = t.log_softmax(logits, dim=-1)
-        # Aggregate logprob for correct answer tokens
-        answer_toks = seq[q_len: q_len + a_len]
-        answer_logprobs = logprobs[q_len - 1 : q_len + a_len - 1, :]
-        # logprob for each answer token, conditioned on previous
-        token_logprobs = answer_logprobs.gather(1, answer_toks.unsqueeze(1)).squeeze(1)
-        total_logprob += token_logprobs.sum().item()
-        total_tokens += a_len
-        # Argmax sampling
-        generated = []
-        input_seq = seq[:q_len].unsqueeze(0)  # [1, q_len]
-        for _ in range(a_len):
-            with t.no_grad():
-                logits = model(input_seq).squeeze(0)  # [cur_len, vocab]
-            next_token = logits[-1].argmax().item()
-            generated.append(next_token)
-            input_seq = t.cat([input_seq, t.tensor([[next_token]], device=input_seq.device)], dim=1)
-        # Compare generated answer to true answer
-        if generated == answer_toks.cpu().tolist():
+        
+        # Get logprob for the single answer token
+        ans_logprob = logprobs[q_len - 1, ans_tok]  # logprob of answer token conditioned on question
+        total_logprob += ans_logprob.item()
+        total_tokens += 1
+        
+        # Argmax sampling - predict single answer token
+        with t.no_grad():
+            logits = model(q_toks).squeeze(0)  # [q_len, vocab]
+        next_token = logits[-1].argmax().item()
+        if next_token == ans_tok:
             correct += 1
+            
     mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
     accuracy = correct / n if n > 0 else float('nan')
     print(f"Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}")
@@ -160,36 +159,45 @@ def benchmark_addition(model: GPT2, dataset: pd.DataFrame, max_answer_len: int =
 
 def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
+    scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
-    wandb.init(project="add_thoughtful", name="normal", config=cfg)
+    input_max = dataset.attrs["input_max"]
+    wandb.init(project="add_thoughtful", name=f"normal_{input_max}", config=cfg)
     wandb.watch(model, log="all")
 
-    for b in (tr:=tqdm.trange(len(dataset), ncols=100)):
-        row = dataset.iloc[b]
-        seq = t.tensor(row["full_seq"])
-        logits = model.forward(seq).squeeze()
-        logprobs = t.log_softmax(logits, dim=-1)
-        q_len = row["question_len"]
-        pred_logprobs = logprobs[t.arange(q_len-1, seq.shape[0] - 1), seq[q_len:]]
+    for b in (tr:=tqdm.trange(0, len(dataset), cfg.batch_size, ncols=100)):
+        q_toks = t.tensor(np.stack(dataset.iloc[b:b+cfg.batch_size]['question_toks']))
+        ans_toks = t.tensor(dataset.iloc[b:b+cfg.batch_size]['answer_tok'].to_numpy())
+        
+        batch_indices = t.arange(len(ans_toks), requires_grad=False)
 
+        logits = model.forward(q_toks).squeeze()
+        logprobs = t.log_softmax(logits, dim=-1)
+
+        pred_logprobs = logprobs[batch_indices, -1, ans_toks]
         loss = -pred_logprobs.mean()
         loss.backward()
-        if b != 0 and b % cfg.batch_size == 0:
-            opt.step()
-            opt.zero_grad()
+        opt.step()
+        scheduler.step()
+        opt.zero_grad()
+
+        if b != 0 and b%1000 == 0:
             wandb.log({"loss": loss.detach().item()})
             tr.set_description(f"{magenta}loss: {loss.detach().item():.3f}")
+            t.save(model.state_dict(), f"saves/add_normal{b}.pth")
 
+INPUT_MAX = 1_000
+NUM_EXAMPLES = 10_000_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
-
-    model_cfg = ModelConfig(d_model=64, seq_len=512, d_mlp=256, d_head=16, n_heads=4, n_layers=4, d_vocab=12)
-    training_cfg = TrainingConfig(gamma=0.95, batch_size=16, lr=3e-4, weight_decay=1e-6, adam_beta1=0.9, adam_beta2=0.95)
+    
+    model_cfg = ModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab=INPUT_MAX + 2)
+    training_cfg = TrainingConfig(batch_size=16, lr=1e-3, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2(model_cfg)
 
-    trainset, testset = makeAdditionDataset(simple_tokenizer, 100, 100_000, train_split=0.99)
-    #dataset = pd.read_pickle("datasets/simple_additions_10K_100K.pkl")
+    simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
+    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
     train(model, training_cfg, trainset)
     benchmark_addition(model, testset)

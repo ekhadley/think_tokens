@@ -77,65 +77,70 @@ def benchmark_addition_think(model: GPT2Thinking, dataset: pd.DataFrame, max_ans
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
+    scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
     input_max = dataset.attrs["input_max"]
-    wandb.init(project="add_thoughtful_think", name=f"think_nothink_{input_max}", config=cfg)
+    wandb.init(project="add_thoughtful_think", name=f"think_fixed_{input_max}", config=cfg)
     wandb.watch(model, log="all")
 
 
-    group_size = 1
+    think_len = 8
+
+    group_size = 2
     think_reward_weight = 0.0
     entropy_reward_weight = 0.0
 
-    prob_force_end_thought = 1.0
-    epsilon = 1.0 # prob of choosing random think token
+    epsilon = 1 # prob of choosing random think token
     eps_decay = 0.999995
     eps_min = 0.05
+
+    end_thoughts = t.tensor([model.end_thought] * group_size, requires_grad=False).unsqueeze(-1)  # end_thought token for each group
+    group_indices = t.arange(group_size, requires_grad=False)
+    think_indices = t.arange(dataset.attrs["q"])
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
         row = dataset.iloc[b]
         q_toks = t.tensor(row["question_toks"])
         ans_tok = row["answer_tok"]  # Single token, not tensor
-        q_len = row["question_len"]
 
-        rollouts, pred_rewards = [], []
         with t.inference_mode(): # do inference without gradients to generate rollouts
-            for g in range(group_size): # for each rollout in the group
-                rollout = q_toks.clone()
-                max_think_idx = model.cfg.seq_len - 1  # Reserve 1 position for answer prediction
-                for i in range(q_len, max_think_idx): # for each think token in the rollout
-                    if random.random() < epsilon:
-                        think_tok = t.tensor([random.randint(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1)])
-                    else:
-                        logits = model(rollout).squeeze()
-                        sample_probs = t.softmax((logits[-1, model.cfg.d_normal_vocab:]), dim=-1) # get logpprob distn over thinking token
-                        think_tok = t.multinomial(sample_probs, num_samples=1) + model.cfg.d_normal_vocab # sample a thinking token
-                    if i == max_think_idx - 1 or random.random() < prob_force_end_thought: 
-                        think_tok = t.tensor([model.end_thought])
-                    rollout = t.cat([rollout, think_tok])
-                    if think_tok.item() == model.end_thought: # end of thinking. get logprobs on answer (reward)
-                        break
+            rollouts = q_toks.unsqueeze(0).repeat(group_size, 1)
+            print()
+            print(blue, rollouts, endc)
+            print(blue, rollouts.shape, endc)
+            for i in range(think_len): # for each think token in the rollout
+                if random.random() < epsilon:
+                    think_toks = t.randint(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1, (group_size, 1))
+                else:
+                    logits = model(rollouts).squeeze()
+                    print(pink, logits.shape, endc)
+                    sample_probs = t.softmax((logits[:, -1, model.cfg.d_normal_vocab:]), dim=-1) # get logpprob distn over thinking token
+                    print(purple, sample_probs.shape, endc)
+                    think_toks = t.multinomial(sample_probs, num_samples=1) + model.cfg.d_normal_vocab # sample a thinking token
 
-                logits = model(rollout).squeeze()
-                logprobs = t.log_softmax(logits[-1, :model.cfg.d_normal_vocab], dim=-1) # get the logprobs of the answer tokens
-                ans_logprob = logprobs[ans_tok]  # ans_tok is the single token ID
-                reward = ans_logprob # reward is the logprob on correct answer token
+                print(lime, think_toks.shape, endc)
+                rollouts = t.cat([rollouts, think_toks], dim=1)
+                print(cyan, rollouts, endc)
+                print(cyan, rollouts.shape, endc)
 
-                pred_rewards.append(reward.detach().item())
-                rollouts.append(rollout)
+            rollouts = t.cat([rollouts, end_thoughts], dim=1)
+            print(orange, rollouts, endc)
+            print(orange, rollouts.shape, endc)
+
+            logits = model(rollouts).squeeze()
+            logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1) # get the logprobs of the answer tokens
+            ans_logprob = logprobs[ans_tok]  # ans_tok is the single token ID
+            reward = ans_logprob # reward is the logprob on correct answer token
+
+            exit()
 
             epsilon = max(epsilon * eps_decay, eps_min)
         
         pred_rewards = t.tensor(pred_rewards, requires_grad=False)
         pred_reward_mean = pred_rewards.mean().item() # mean logprob of correct answer token
         mc_pred_rewards = pred_rewards - pred_reward_mean # mean centered rewards
-
-        #normed_pred_rewards = mc_pred_rewards / (pred_rewards.std() + 1e-8)
-        normed_pred_rewards = mc_pred_rewards / (pred_rewards[0] + 1e-8) # debug line beuase std with group size 1 causes nan
-        
-        #pred_reward_var = pred_rewards.var().item() # variance of the mean centered rewards
-        pred_reward_var = 0 # debug line because variance with group size 1 causes nan
-        
+        normed_pred_rewards = mc_pred_rewards / (pred_rewards.std() + 1e-8)
+        pred_reward_var = pred_rewards.var().item() # variance of the mean centered rewards
         pred_probs = t.exp(pred_rewards) # convert logprobs to probabilities
         pred_prob_var = pred_probs.var().item() # variance of the probabilities of the correct answer token
 
@@ -169,18 +174,11 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         entropy_reward_mean = sum(entropy_rewards) / len(entropy_rewards)
 
         total_reward = sum(total_rewards) / len(total_rewards)
-        #total_reward.backward()
-        
-        # debugging test
-        logits = model.forward(q_toks).squeeze()
-        logprobs = t.log_softmax(logits[-1], dim=-1)
-        loss = logprobs[ans_tok]
-        loss.backward()
-        # debugging test
-
+        total_reward.backward()
 
         if b != 0 and b % cfg.batch_size == 0:
             opt.step()
+            scheduler.step()
             opt.zero_grad()
 
             wandb.log({
@@ -208,7 +206,7 @@ if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
 
     model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=100)
-    training_cfg = TrainingConfig(batch_size=16, lr=1e-3, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(batch_size=16, lr=1e-3, weight_decay=1e-6, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2Thinking(model_cfg)
 
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
