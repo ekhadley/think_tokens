@@ -18,6 +18,11 @@
                     - If we give rewards based on variance of prediction probabilities, this is telling the logits for below avg rollouts to be more negative, and for above average rollouts to be more positive. We already got dat. 
                     - But the main difference is that if the logprob was already hugely negative, gradient is basically zero becuase making logprob more negative hardly changes the prob in absolute terms. But if the logprob is close to 0, this produces much larger changes in the resulting prob.
         
+            - exploration can be done without noise via search:
+                - option 1: during training, explore the tree of thought, with a heuristic of "if the chain of thought ended here, what would it's prediction accuracy be". Could be an alternative to group sampling even. Just take the group as the tree's endpoints.
+                - option 2: train a full value network to approximate what is calculated above via search. Then it could be used even at inference/when the correct answer is not known.
+            - 
+        
         - stab in the dark: maybe a separate model for predicting and thinking, like the target and active model used in q-learning
             - in q-learning you keep 2 versions of the model. The q-value model tells us the value of a q-state. The value of a q-state determines our policy, which we need to determine the value of a q-state, etc. We gather trajectories using the main network. We make predictions using these transitions to train the target network. Every so often, we switch the target and main networks.
             - Not sure if there's a good analogy. We need a few inputs for training:

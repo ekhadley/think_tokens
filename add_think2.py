@@ -171,10 +171,12 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         total_reward = sum(total_rewards) / len(total_rewards)
         #total_reward.backward()
         
+        # debugging test
         logits = model.forward(q_toks).squeeze()
         logprobs = t.log_softmax(logits[-1], dim=-1)
         loss = logprobs[ans_tok]
         loss.backward()
+        # debugging test
 
 
         if b != 0 and b % cfg.batch_size == 0:
