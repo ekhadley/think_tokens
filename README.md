@@ -1,3 +1,33 @@
+- addition task:
+    - add_normal works.
+    - add_think works but shows no sign of actually using the thinking tokens.
+        - common failure mode:
+            - first the model learns to ignore the thinking tokens and just trains like a regular model
+            - with high epsilon, it the model is collapsing to putting logprob of 0 (100% prob) on a single think token and huge negative on all others.
+                - epsilon exploration causes the model to randomly produce the not-constant thinking token. maybe it's learns to make proper predictions while relying on the existence of the constant thought and ignoring others. This would produce a situation where given that thinking token produces better predictions than those where we got epsilon sampled away from it? This gives us hgih logprob on token where performance is higher and (very) low logprob when pred performance is worse. hence exploding think reward. maybe?
+            - When epsilon is low, and the model can't rely on being forced to produce off distn thinking tokens, it resorts to not thinking at all (even with entropy reward)
+
+        - Another issue is how to do exploration?
+            - if we use random thinking tokens, the model really is enocuraged to just ignore them.
+            - Can we encourage rollout variance somehow? like a reward penalty for being far from the mean?
+                - This is already built into the reward, obviously, since the rewards are mean centered.
+                - And if we encourage "having better accuracy than the mean accuracy of the group" as well as "have a very different accuracy than the mean accuracy of the group" it seems like the latter is much easier to optimize for. maybe?
+                - Encouraging high *probability* variance may work, due to the fact that this requires the probabilities in question to be close to 1. Like you can have huge logit variance but no prob variance if all the logits are very negative. But high probability variance can only be acheived if some of the logits are pretty high.
+                    - verified by the fact that the highest prob variances ever logged were for the 10 max addition task, where the model can easily solve it without any thinking tokens.
+                - does loss based on sample variance even make any sense gradient-wise? 
+                    - If we give rewards based on variance of prediction probabilities, this is telling the logits for below avg rollouts to be more negative, and for above average rollouts to be more positive. We already got dat. 
+                    - But the main difference is that if the logprob was already hugely negative, gradient is basically zero becuase making logprob more negative hardly changes the prob in absolute terms. But if the logprob is close to 0, this produces much larger changes in the resulting prob.
+        
+        - stab in the dark: maybe a separate model for predicting and thinking, like the target and active model used in q-learning
+            - in q-learning you keep 2 versions of the model. The q-value model tells us the value of a q-state. The value of a q-state determines our policy, which we need to determine the value of a q-state, etc. We gather trajectories using the main network. We make predictions using these transitions to train the target network. Every so often, we switch the target and main networks.
+            - Not sure if there's a good analogy. We need a few inputs for training:
+                - thinking trajectories
+                - logits of think tokens in a trajectory
+                - prediction logprobs for the answer to  the addition problem
+        
+        - Reward the model based on attention scores to the think tokens?
+            - There are other ways to learn  to ignore the thinking tokens and still have high attention. Make their embeddings or value vectors be close to 0, etc.
+
 - stuff yet to try:
     - if a normal thingy works, we should try continuous thinking token version
         - might be out of scope honestly.
@@ -23,9 +53,9 @@
         - we get the logprob from the last thought token in the rollout.
         - We promote the logprobs that generated all the thinking tokens in that rollout if it was *better than the avg* accuracy for that sequence, and vice versa.
     - The problem:
-        - Woll reward thinking tokens whenever the next token prediction accuracy is high.
+        - Will reward thinking tokens whenever the next token prediction accuracy is high.
         - Also rewards thinking tokens whenever the token is just easy to predict.
-        - by my estimation this effect will be much stronger, at least at first, than the actuall lift from the thinking tokens.
+            - by my estimation this effect will be much stronger, at least at first, than the actuall lift from the thinking tokens.
     - what do to:
         - maybe you can just keep training? both signals are there, so?
             - unlikely. detect easy tokens and spew on those is much easier to learn and simpler than actually learning to use the tokens.
@@ -42,17 +72,3 @@
             - I beleive this is basically the thing they did for r1, calling it GRPO.
 
     - It seems like training on a synthetic task is probably the best way to gain understanding and test these various ways to address the issue.
-
-- I read quiet-star paper
-    - It proposes something similair:
-        - rl on intermediate hidden tokens with rewards coming from next token prediction
-    - It's differences are really what I viewed as being the important part of my project. namely:
-        - Still using normal language tokens as the intermedaite tokens
-        - Only do it with pretrained models, fine tuned to do the reasoning?
-        - Selectively start and end thinking based on the output of a start thinking token.
-        - The rl loss comes from taking the same model and running it on the sequence with/without intermediate thinking to evalute which chains of thought were causally useful.
-        - Methodology in general seems quite silly. making the embedding for the start thought be the same as the em-dash?
-            - The unimpressive reasoning traces they show as examples support my suspicion that these design choices are not allowing the model to use the intermediate computation anywhere near optimally.
-    - The choices in the paper seem strange to me, and it feels like they were aiming for something else but had to pivot to make something publishable.
-    - Possibly they were trying to do what i'm doing but failed?
-    - I consider this paper to not be stepping on my toes but is probably evidence that what i'm trying to do is hard to get working
