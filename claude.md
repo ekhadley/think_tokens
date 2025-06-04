@@ -14,7 +14,8 @@ pipenv install
 pipenv shell
 
 # All scripts can be run directly with python
-python add_normal2.py
+python add_normal.py
+python add_think.py
 python add_think2.py
 ```
 
@@ -25,8 +26,8 @@ python add_think2.py
 - **GPT2Thinking**: Extended transformer that can generate thinking tokens in addition to normal vocabulary tokens
 
 ### Core Training Approaches
-1. **Normal Training** (`add_normal2.py`): Standard supervised learning on addition tasks
-2. **Thinking Token Training** (`add_think2.py`): RL approach where models learn to use thinking tokens to improve prediction accuracy
+1. **Normal Training** (`add_normal.py`): Standard supervised learning on addition tasks
+2. **Thinking Token Training** (`add_think.py`, `add_think2.py`): RL approach where models learn to use thinking tokens to improve prediction accuracy
 3. **Rollout Training** (`rollout_think.py`, `supervised_rollout_think.py`): Advanced RL training with reference models and discounted rewards
 
 ### Configuration Classes
@@ -39,9 +40,10 @@ python add_think2.py
 ### Addition Task Experiments
 ```bash
 # Normal model baseline
-python add_normal2.py
+python add_normal.py
 
-# Thinking token model with RL training
+# Thinking token models with RL training
+python add_think.py
 python add_think2.py
 ```
 
@@ -62,6 +64,7 @@ python supervised_rollout_think.py
 ### Dataset Creation
 - `SimpleTokenizer`: Custom tokenizer for arithmetic tasks 
 - `makeAdditionDataset()`: Generates addition problem datasets with configurable difficulty
+- Dataset attributes store metadata like `input_max`, `question_len` instead of per-row fields for efficiency
 
 ### Model Loading/Saving
 - `loadModel()`: Load saved model checkpoints from `saves/` directory
@@ -90,8 +93,9 @@ python supervised_rollout_think.py
 
 ## Current Research Challenges
 
-Based on README.md, key open problems include:
+Based on implementation, key open problems include:
 - Preventing models from ignoring thinking tokens during training
 - Proper credit assignment for which thinking tokens were actually useful
 - Balancing exploration vs exploitation in the large thinking token action space
 - Using reference models vs. mean performance for reward baselines
+- Optimizing parallel rollout generation for efficiency

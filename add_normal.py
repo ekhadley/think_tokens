@@ -96,7 +96,7 @@ def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.
     })
     train_dataset.attrs['n_examples'] = n_questions
     train_dataset.attrs['input_max'] = int_max
-    train_dataset.attrs['question_len'] = len(train_questions[0]) if train_questions else 0
+    train_dataset.attrs['question_len'] = len(question_toks[0]) if train_questions else 0
     if n_test > 0:
         # Clear lists and add test examples
         question_str.clear(); answer_str.clear(); question_toks.clear(); answer_tok.clear()
@@ -109,7 +109,7 @@ def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.
         })
         test_dataset.attrs['n_examples'] = n_questions
         test_dataset.attrs['input_max'] = int_max
-        test_dataset.attrs['question_len'] = len(test_questions[0]) if test_questions else 0
+        test_dataset.attrs['question_len'] = len(question_toks[0]) if test_questions else 0
         return train_dataset, test_dataset
     else:
         train_dataset.to_pickle(f"datasets/additions_{int_max}_{n_questions}.pkl")

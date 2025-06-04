@@ -12,7 +12,7 @@ from eindex import eindex
 
 from normal import GPT2
 from supervised_rollout_think import GPT2Thinking
-from add_normal2 import SimpleTokenizer, makeAdditionDataset
+from add_normal import SimpleTokenizer, makeAdditionDataset
 from utils import *
 
 def printSeq(seq: t.Tensor, tokenizer, cfg: ThinkingModelConfig) -> None:
