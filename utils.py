@@ -47,8 +47,10 @@ class ThinkingModelConfig:
     n_heads: int = 8
     n_layers: int = 8
     d_normal_vocab: int = 50257
-    d_thought_vocab: int = 50257
-    d_vocab_total: int = d_normal_vocab + d_thought_vocab
+    d_thought_vocab: int = 2048
+    
+    def __post_init__(self):
+        self.d_vocab_total = self.d_normal_vocab + self.d_thought_vocab
 
 @dataclass
 class TrainingConfig:
