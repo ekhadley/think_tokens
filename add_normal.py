@@ -186,8 +186,8 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
             tr.set_description(f"{magenta}loss: {loss.detach().item():.3f}")
             t.save(model.state_dict(), f"saves/add_normal{b}.pth")
 
-INPUT_MAX = 1_000
-NUM_EXAMPLES = 10_000_000
+INPUT_MAX = 100
+NUM_EXAMPLES = 1_000_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))

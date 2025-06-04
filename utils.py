@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import torch as t
 from torch import nn
 from torch.nn import functional as F
@@ -26,63 +27,45 @@ endc = '\033[0m'
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
 
+@dataclass
 class ModelConfig:
-    def __init__(
-            self,
-            d_model:int = 512,
-            seq_len:int = 512,
-            d_mlp:int = 2048,
-            d_head:int = 64,
-            n_heads:int = 8,
-            n_layers:int = 6,
-            d_vocab:int = 50257,
-        ):
-        self.d_model = d_model
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.d_mlp = d_mlp
-        self.d_head = d_head
-        self.d_vocab = d_vocab
-        self.seq_len = seq_len
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 6
+    d_vocab: int = 50257
+    seq_len: int = 512
 
+@dataclass
 class ThinkingModelConfig:
-    def __init__(
-            self,
-            d_model:int = 512,
-            seq_len:int = 512,
-            d_mlp:int = 2048,
-            d_head:int = 64,
-            n_heads:int = 8,
-            n_layers:int = 8,
-            d_normal_vocab:int = 50257,
-            d_thought_vocab:int = 50257,
-        ):
-        self.d_model = d_model
-        self.seq_len = seq_len
-        self.d_mlp = d_mlp
-        self.d_head = d_head
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.d_normal_vocab = d_normal_vocab
-        self.d_thought_vocab = d_thought_vocab
-        self.d_vocab_total = d_normal_vocab + d_thought_vocab
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 8
+    d_normal_vocab: int = 50257
+    d_thought_vocab: int = 50257
+    d_vocab_total: int = d_normal_vocab + d_thought_vocab
 
+@dataclass
 class TrainingConfig:
-    def __init__(
-            self,
-            batch_size:int = 32,
-            lr:float = 3e-4,
-            weight_decay:float = 1e-1,
-            adam_beta1:float = 0.9,
-            adam_beta2:float = 0.95,
-            gamma:float = 0.95,
-        ):
-        self.batch_size = batch_size
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.adam_beta1 = adam_beta1
-        self.adam_beta2 = adam_beta2
-        self.gamma = gamma
+    batch_size: int = 32
+    lr: float = 3e-4
+    weight_decay: float = 1e-1
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.95
+    gamma: float = 0.95
+
+    think_len: int = 8
+    group_size: int = 16
+    think_reward_weight: float = 0.0
+    entropy_reward_weight: float = 0.0
+    prob_force_end_thought: float = 1.0
+    eps_decay: float = 0.999995
+    eps_min: float = 0.05
 
 
 def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:

@@ -15,64 +15,21 @@ from supervised_rollout_think import GPT2Thinking
 from add_normal import SimpleTokenizer, makeAdditionDataset
 from utils import *
 
-def printSeq(seq: t.Tensor, tokenizer, cfg: ThinkingModelConfig) -> None:
-    seq = seq.squeeze()
-    print()
-    for token in seq:
-        if token < cfg.d_normal_vocab:
-            print(blue, tokenizer.id_to_token[token.item()], endc, end="", sep="")
-        elif token == cfg.d_vocab_total - 1:
-            print(magenta, "<end_thought>", endc, end="", sep="")
-        else:
-            print(cyan, f"<think{token.item() - cfg.d_normal_vocab}>", endc, end="", sep="")
-    print()
+def evalRollout(model: GPT2Thinking, rollout: t.Tensor, ans_tok: int) -> float: # concatenates an end_thought to the rollout and  evaluates the logprob of the answer token.
+    with t.no_grad():
+        rollout = t.cat([rollout, t.tensor([model.end_thought], device=rollout.device)])
+        logits = model(rollout).squeeze()
+        logprobs = t.log_softmax(logits[..., :model.cfg.d_normal_vocab], dim=-1)
+        ans_logprob = logprobs[-1, ans_tok]
+    return ans_logprob.item()
 
-def benchmark_addition_think(model: GPT2Thinking, dataset: pd.DataFrame, max_answer_len: int = 10, group_size: int = 1):
-    """
-    Benchmarks the thinking model's addition ability on a dataset.
-    For each question, generates a rollout by sampling thinking tokens, then predicts the single answer token.
-    Returns:
-        - mean_logprob: mean logprob over correct answer tokens
-        - accuracy: fraction of exact matches using argmax sampling
-    """
-    model.eval()
-    prob_force_end_thought = 0.1
-    total_logprob = 0.0
-    total_tokens = 0
-    correct = 0
-    n = len(dataset)
-    for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=n, desc="BenchmarkThink", ncols=100):
-        q_toks = t.tensor(row.question_toks)
-        ans_tok = row.answer_tok  # Single token
-        q_len = row.question_len
-
-        rollout = q_toks.clone()
-        with t.no_grad():
-            for i in range(q_len, model.cfg.seq_len - 1):  # Reserve 1 position for answer
-                logits = model(rollout).squeeze()
-                logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1)
-                if i == model.cfg.seq_len - 2 or random.random() < prob_force_end_thought: 
-                    think_tok = model.end_thought
-                else: 
-                    think_tok = logprobs[-1].argmax().item() + model.cfg.d_normal_vocab
-                rollout = t.cat([rollout, t.tensor([think_tok], device=rollout.device)])
-                if think_tok == model.end_thought: break
-            
-            # Predict answer token
-            logits = model(rollout).squeeze()
-            logprobs = t.log_softmax(logits[..., :model.cfg.d_normal_vocab], dim=-1)
-            ans_logprob = logprobs[-1, ans_tok]
-            total_logprob += ans_logprob.item()
-            total_tokens += 1
-            
-            answer_logit = logits[-1, :model.cfg.d_normal_vocab]
-            generated = answer_logit.argmax().item()
-            if generated == ans_tok:
-                correct += 1
-    mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
-    accuracy = correct / n if n > 0 else float('nan')
-    print(f"[Think] Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}")
-    return mean_logprob, accuracy
+# creates a batch where each continueation concatenates 1 of all the possible thinking tokens
+# returns a tensor of correct answer logprobs for each continuation
+def expandSteps(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int) -> t.Tensor:
+    with t.no_grad():
+        rollout = rollout.repeat(model.cfg.d_thought_vocab, 1)
+        rollout = t.cat([rollout, t.arange(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1).unsqueeze(0)], dim=1)
+        print(rollout)
 
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
@@ -163,7 +120,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "think_logprobs": action_logprobs,
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
-            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}, num_think: {think_len:.3f}")
+            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
 
         if b != 0 and b % 1000 == 0:
             t.save(model.state_dict(), f"saves/add_think2_{b}.pt")
@@ -182,4 +139,4 @@ if __name__ == "__main__":
     trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
     train(model, training_cfg, trainset)
-    benchmark_addition_think(model, testset)
+    #benchmark_addition_think_fixed(model, testset)

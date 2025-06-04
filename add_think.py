@@ -85,14 +85,14 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
     q_len = dataset.attrs["question_len"]
 
-    group_size = 16
-    think_reward_weight = 0.0
-    entropy_reward_weight = 0.0
+    #group_size = 16
+    #think_reward_weight = 0.0
+    #entropy_reward_weight = 0.0
 
-    prob_force_end_thought = 1.0
     epsilon = 1.0 # prob of choosing random think token
-    eps_decay = 0.999995
-    eps_min = 0.05
+    #prob_force_end_thought = 1.0
+    #eps_decay = 0.999995
+    #eps_min = 0.05
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
         row = dataset.iloc[b]
@@ -102,7 +102,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
         rollouts, pred_rewards = [], []
         with t.inference_mode(): # do inference without gradients to generate rollouts
-            for g in range(group_size): # for each rollout in the group
+            for g in range(cfg.group_size): # for each rollout in the group
                 rollout = q_toks.clone()
                 max_think_idx = model.cfg.seq_len - 1  # Reserve 1 position for answer prediction
                 for i in range(q_len, max_think_idx): # for each think token in the rollout
@@ -112,7 +112,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                         logits = model(rollout).squeeze()
                         sample_probs = t.softmax((logits[-1, model.cfg.d_normal_vocab:]), dim=-1) # get logpprob distn over thinking token
                         think_tok = t.multinomial(sample_probs, num_samples=1) + model.cfg.d_normal_vocab # sample a thinking token
-                    if i == max_think_idx - 1 or random.random() < prob_force_end_thought: 
+                    if i == max_think_idx - 1 or random.random() < cfg.prob_force_end_thought: 
                         think_tok = t.tensor([model.end_thought])
                     rollout = t.cat([rollout, think_tok])
                     if think_tok.item() == model.end_thought: # end of thinking. get logprobs on answer (reward)
@@ -126,7 +126,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 pred_rewards.append(reward.detach().item())
                 rollouts.append(rollout)
 
-            epsilon = max(epsilon * eps_decay, eps_min)
+            epsilon = max(epsilon * cfg.eps_decay, cfg.eps_min)
         
         pred_rewards = t.tensor(pred_rewards, requires_grad=False)
         pred_reward_mean = pred_rewards.mean().item() # mean logprob of correct answer token
@@ -136,10 +136,10 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         pred_probs = t.exp(pred_rewards) # convert logprobs to probabilities
         pred_prob_var = pred_probs.var().item() # variance of the probabilities of the correct answer token
 
-        mean_num_think = sum([len(r) for r in rollouts]) / group_size - 4
+        mean_num_think = sum([len(r) for r in rollouts]) / cfg.group_size - 4
         
         total_rewards, think_rewards, entropy_rewards = [], [], []
-        for g in range(group_size): # we run the rollouts back through with gradients to get a differentiable reward
+        for g in range(cfg.group_size): # we run the rollouts back through with gradients to get a differentiable reward
             rollout = rollouts[g].clone()
             logits = model(rollout).squeeze()
             logprobs = t.log_softmax(logits, dim=-1)
@@ -159,7 +159,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             entropy_reward = entropy.mean() # average over think steps
             entropy_rewards.append(entropy_reward.detach().item())
 
-            total_reward = (1 - think_reward_weight)*pred_reward + think_reward_weight*think_reward + entropy_reward_weight*entropy_reward
+            total_reward = (1 - cfg.think_reward_weight)*pred_reward + cfg.think_reward_weight*think_reward + cfg.entropy_reward_weight*entropy_reward
             total_rewards.append(total_reward)
 
         think_reward_mean = sum(think_rewards) / len(think_rewards)
@@ -181,7 +181,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "entropy_reward": entropy_reward_mean,
                 "pred_reward_var": pred_reward_var,
                 "pred_prob_var": pred_prob_var,
-                "prob_force_end_thought": prob_force_end_thought,
+                "prob_force_end_thought": cfg.prob_force_end_thought,
                 "epsilon": epsilon,
                 "think_logprobs": think_logprobs_all,
             })
@@ -198,7 +198,19 @@ if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
 
     model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=100)
-    training_cfg = TrainingConfig(batch_size=16, lr=1e-3, weight_decay=1e-6, adam_beta1=0.9, adam_beta2=0.95)
+    training_cfg = TrainingConfig(
+        group_size=16,
+        think_reward_weight=0.0,
+        entropy_reward_weight=0.0,
+        prob_force_end_thought=1.0,
+        eps_decay=0.999995,
+        eps_min=0.05,
+        batch_size=16,
+        lr=1e-3,
+        weight_decay=1e-6,
+        adam_beta1=0.9,
+        adam_beta2=0.95
+    )
     model = GPT2Thinking(model_cfg)
 
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
