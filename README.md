@@ -35,6 +35,12 @@
 
         - potential issue. alphazero apparently only took *one* state from each game during training, becuase correlated gradients reduce update quality.
             - we are currently training on every think token logit in a number of groups attempting to solve the same problem. giga correlated.
+        
+        - potentially this is a general issue. The constant part of the input is the question, and the thinking tokens are all over the place. If we train it to predict before the thinking tokens are useful, it will always just ignore them. So either we don't allow it to ignore the thinking tokens or we dont train it to predict before the thinking tokens become useful.
+            - So you could have the prediction happen using *only* the thinking tokens, not the original question.
+                - This works nicely for toy addition problems, but is it an issue for actual next token prediction?
+                - The thoughts would have to encode literally every relevant thing for predicting the next token. So does it basically mean the thinking step does all the real work?
+                    - kind of, but thats kind of the point. The new thing is that it would do all this work over multiple forward passes, recombining it all with the final singular prediction taking all the thoughts into context.
 
 - stuff yet to try:
     - if a normal thingy works, we should try continuous thinking token version

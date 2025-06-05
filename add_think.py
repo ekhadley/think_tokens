@@ -49,11 +49,11 @@ def benchmark_addition_think(model: GPT2Thinking, dataset: pd.DataFrame, max_ans
         rollout = q_toks.clone()
         with t.no_grad():
             for i in range(q_len, model.cfg.seq_len - 1):  # Reserve 1 position for answer
-                logits = model(rollout).squeeze()
-                logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1)
                 if i == model.cfg.seq_len - 2 or random.random() < prob_force_end_thought: 
                     think_tok = model.end_thought
                 else: 
+                    logits = model(rollout).squeeze()
+                    logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1)
                     think_tok = logprobs[-1].argmax().item() + model.cfg.d_normal_vocab
                 rollout = t.cat([rollout, t.tensor([think_tok], device=rollout.device)])
                 if think_tok == model.end_thought: break
@@ -85,14 +85,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
     q_len = dataset.attrs["question_len"]
 
-    #group_size = 16
-    #think_reward_weight = 0.0
-    #entropy_reward_weight = 0.0
-
     epsilon = 1.0 # prob of choosing random think token
-    #prob_force_end_thought = 1.0
-    #eps_decay = 0.999995
-    #eps_min = 0.05
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
         row = dataset.iloc[b]
@@ -202,7 +195,7 @@ if __name__ == "__main__":
         group_size=16,
         think_reward_weight=0.0,
         entropy_reward_weight=0.0,
-        prob_force_end_thought=1.0,
+        prob_force_end_thought=0.05,
         eps_decay=0.999995,
         eps_min=0.05,
         batch_size=16,

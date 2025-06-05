@@ -159,7 +159,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
 
         if b != 0 and b % 1000 == 0:
-            t.save(model.state_dict(), f"saves/add_think2_{b}.pt")
+            t.save(model.state_dict(), f"saves/add_think_fixed_{b}.pt")
 
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000

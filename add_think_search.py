@@ -8,7 +8,9 @@ from transformers import GPT2TokenizerFast, AutoTokenizer
 import random
 import pandas as pd
 import numpy as np
+import itertools
 from eindex import eindex
+from collections import deque
 
 from normal import GPT2
 from supervised_rollout_think import GPT2Thinking
@@ -23,19 +25,17 @@ def evalRollout(model: GPT2Thinking, rollout: t.Tensor, ans_tok: int) -> float: 
         ans_logprob = logprobs[-1, ans_tok]
     return ans_logprob.item()
 
-# creates a batch where each continueation concatenates 1 of all the possible thinking tokens
-# returns a tensor of correct answer logprobs for each continuation
 def expandThought(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int) -> t.Tensor:
     with t.no_grad():
-        rollout = rollout.repeat(model.cfg.d_thought_vocab - 1, 1)
-        rollout = t.cat([rollout, t.arange(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1).unsqueeze(-1)], dim=1)
-        rollout = t.cat([rollout, t.tensor([model.end_thought]*rollout.shape[0]).unsqueeze(-1)], dim=1)
-        logits = model(rollout).squeeze()
+        rollouts = rollout.repeat(model.cfg.d_thought_vocab - 1, 1)
+        rollouts = t.cat([rollouts, t.arange(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1).unsqueeze(-1)], dim=1)
+        #rollouts = t.cat([rollouts, t.tensor([model.end_thought]*rollout.shape[0]).unsqueeze(-1)], dim=1)
+        logits = model(rollouts).squeeze()
         pred_logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
         ans_logprobs = pred_logprobs[:, ans_tok]
-    return ans_logprobs
+    return rollouts, ans_logprobs
 
-def greedyThoughtSearch(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int, max_steps: int = 10) -> t.Tensor:
+def greedyThoughtSearch(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int, max_steps: int) -> t.Tensor:
     """
     Greedily expands the rollout by choosing the thinking token that maximizes the logprob of the answer token.
     Returns a tensor of the final rollout with the end_thought token appended.
@@ -50,6 +50,34 @@ def greedyThoughtSearch(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int, ma
             print(orange, best_thought_idx, next_thought_scores.max(), endc)
             rollout = t.cat([rollout, t.tensor([best_thought_idx])], dim=0)
             print(blue, rollout, endc)
+
+
+def allPossibleRollouts(low: int, high: int, size: int) -> t.Tensor:
+    base = t.arange(low, high, dtype=t.int64)
+    if size == 1:
+        return base.view(1, -1)
+    grids = t.meshgrid(*([base] * size), indexing='ij')  # list length `size`
+    return t.stack(grids).reshape(size, -1).T
+
+
+def bruteForceThoughtSearch(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int, max_steps: int) -> t.Tensor:
+    """
+    Exhaustively searches all possible thinking token combinations up to max_steps.
+    Returns the rollout with the highest logprob of the answer token.
+    """
+    # create a single 2d tensor containing all possible rollouts. This is every permutation of thinking tokens up to max_steps
+    with t.no_grad():
+        print()
+        perms = allPossibleRollouts(model.cfg.d_normal_vocab, model.cfg.d_vocab_total, max_steps)
+        rollouts = t.cat([rollout.repeat(perms.shape[0], 1), perms], dim=1)
+        print(pink, rollouts, endc)
+        logits = model(rollouts).squeeze()
+        pred_logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
+        ans_logprobs = pred_logprobs[:, ans_tok]
+        print(purple, ans_logprobs, endc)
+        print(orange, ans_logprobs.min().item(), ans_logprobs.max().item(), ans_logprobs.mean().item(), endc)
+    return ans_logprobs
+
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
@@ -74,10 +102,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             for g in range(cfg.group_size): # for each rollout in the group
                 rollout = q_toks.clone()
                 max_think_idx = model.cfg.seq_len - 1  # Reserve 1 position for answer prediction
-
-                #evalRollout(model, rollout, ans_tok) # evaluate the initial rollout to get the logprob of the answer token
-                greedyThoughtSearch(rollout, model, ans_tok, max_steps=16) # greedy search to expand the rollout with thinking tokens
-                exit()
 
                 for i in range(q_len, max_think_idx): # for each think token in the rollout
                     if random.random() < epsilon:
@@ -162,8 +186,11 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, entropy: {entropy_reward_mean:.3f}, epsilon: {epsilon:.3f}, num_think: {mean_num_think:.3f}")
 
-        if b != 0 and b % 1000 == 0:
-            t.save(model.state_dict(), f"saves/add_think2_{b}.pt")
+        if b % 1000 == 0:
+            #t.save(model.state_dict(), f"saves/add_think2_{b}.pt")
+            #greedyThoughtSearch(rollout, model, ans_tok, max_steps=16) # greedy search to expand the rollout with thinking tokens
+            #dfsThoughtSearch(rollout, model, ans_tok, max_steps=16) # greedy search to expand the rollout with thinking tokens
+            bruteForceThoughtSearch(rollout, model, ans_tok, max_steps=4) # greedy search to expand the rollout with thinking tokens
 
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
@@ -171,12 +198,12 @@ NUM_EXAMPLES = 1_000_000
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
 
-    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=10)
+    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=16)
     training_cfg = TrainingConfig(
         group_size=16,
-        think_reward_weight=0.0,
+        think_reward_weight=0.5,
         entropy_reward_weight=0.0,
-        prob_force_end_thought=1.0,
+        prob_force_end_thought=0.05,
         eps_decay=0.999995,
         eps_min=0.05,
         batch_size=16,
