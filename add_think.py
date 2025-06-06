@@ -181,7 +181,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, entropy: {entropy_reward_mean:.3f}, epsilon: {epsilon:.3f}, num_think: {mean_num_think:.3f}")
 
-        if b != 0 and b % 1000 == 0:
+        if b != 0 and b % 10_000 == 0:
             t.save(model.state_dict(), f"saves/add_think2_{b}.pt")
 
 INPUT_MAX = 100

@@ -1,3 +1,8 @@
+- current todo:
+    - integrate search
+    - mask original question
+    - value net/value head that estimates accuracy given rollout
+
 - addition task:
     - add_normal works.
     - add_think works but shows no sign of actually using the thinking tokens.
@@ -41,6 +46,14 @@
                 - This works nicely for toy addition problems, but is it an issue for actual next token prediction?
                 - The thoughts would have to encode literally every relevant thing for predicting the next token. So does it basically mean the thinking step does all the real work?
                     - kind of, but thats kind of the point. The new thing is that it would do all this work over multiple forward passes, recombining it all with the final singular prediction taking all the thoughts into context.
+
+            - verified: If we manually create a useful chain of thought, the predicting head trivially solves the prediction task.
+                - remember this is for the 'cant see the question during prediction, only the thinking tokens' version
+                - I gave the model 10 thinking tokens. rollouts were made by spelling out the answer in digits.
+                    - so if the answer is 52, the thought rollout it's given is length 2 and looks like [5th thinking token, 2nd thinking token, end_thought]
+                - the thinking distribution does very regularly collapse it seems, so entropy term in the loss should become the default.
+                - This seems like a good way to find a procedure that works for the rl component. The prediction head works, the rl now has a hill to climb. How do we get it to do that.
+    
 
 - stuff yet to try:
     - if a normal thingy works, we should try continuous thinking token version

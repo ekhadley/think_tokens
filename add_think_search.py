@@ -36,21 +36,14 @@ def expandThought(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int) -> t.Ten
     return rollouts, ans_logprobs
 
 def greedyThoughtSearch(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int, max_steps: int) -> t.Tensor:
-    """
-    Greedily expands the rollout by choosing the thinking token that maximizes the logprob of the answer token.
-    Returns a tensor of the final rollout with the end_thought token appended.
-    """
+
     with t.no_grad():
         print()
         print(green, rollout, endc)
         for _ in range(max_steps):
             next_thought_scores = expandThought(rollout, model, ans_tok)
-            print(pink, next_thought_scores, endc)
             best_thought_idx = next_thought_scores.argmax().item() + model.cfg.d_normal_vocab
-            print(orange, best_thought_idx, next_thought_scores.max(), endc)
             rollout = t.cat([rollout, t.tensor([best_thought_idx])], dim=0)
-            print(blue, rollout, endc)
-
 
 def allPossibleRollouts(low: int, high: int, size: int) -> t.Tensor:
     base = t.arange(low, high, dtype=t.int64)
@@ -58,7 +51,6 @@ def allPossibleRollouts(low: int, high: int, size: int) -> t.Tensor:
         return base.view(1, -1)
     grids = t.meshgrid(*([base] * size), indexing='ij')  # list length `size`
     return t.stack(grids).reshape(size, -1).T
-
 
 def bruteForceThoughtSearch(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int, max_steps: int) -> t.Tensor:
     """
@@ -70,14 +62,13 @@ def bruteForceThoughtSearch(rollout: t.Tensor, model: GPT2Thinking, ans_tok: int
         print()
         perms = allPossibleRollouts(model.cfg.d_normal_vocab, model.cfg.d_vocab_total, max_steps)
         rollouts = t.cat([rollout.repeat(perms.shape[0], 1), perms], dim=1)
-        print(pink, rollouts, endc)
+        rollouts = t.cat([rollouts, t.tensor([model.end_thought] * rollouts.shape[0]).unsqueeze(-1)], dim=1)
         logits = model(rollouts).squeeze()
         pred_logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
         ans_logprobs = pred_logprobs[:, ans_tok]
         print(purple, ans_logprobs, endc)
         print(orange, ans_logprobs.min().item(), ans_logprobs.max().item(), ans_logprobs.mean().item(), endc)
     return ans_logprobs
-
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)

@@ -181,7 +181,7 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
         scheduler.step()
         opt.zero_grad()
 
-        if b != 0 and b%1000 == 0:
+        if b != 0 and b % 10_000 == 0:
             wandb.log({"loss": loss.detach().item()})
             tr.set_description(f"{magenta}loss: {loss.detach().item():.3f}")
             t.save(model.state_dict(), f"saves/add_normal{b}.pth")
