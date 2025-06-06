@@ -27,7 +27,7 @@ def printSeq(seq: t.Tensor, tokenizer, cfg: ThinkingModelConfig) -> None:
             print(cyan, f"<think{token.item() - cfg.d_normal_vocab}>", endc, end="", sep="")
     print()
 
-def benchmark_addition_think_fixed(model: GPT2Thinking, dataset: pd.DataFrame, max_answer_len: int = 10, group_size: int = 1):
+def benchmark_addition_think_fixed(model: GPT2Thinking, dataset: pd.DataFrame, think_len: int):
     """
     Benchmarks the thinking model's addition ability on a dataset using fixed-length thinking.
     For each question, generates exactly 8 thinking tokens followed by end_thought, then predicts the answer token.
@@ -36,7 +36,6 @@ def benchmark_addition_think_fixed(model: GPT2Thinking, dataset: pd.DataFrame, m
         - accuracy: fraction of exact matches using argmax sampling
     """
     model.eval()
-    think_len = 8
     total_logprob = 0.0
     total_tokens = 0
     correct = 0
@@ -44,21 +43,16 @@ def benchmark_addition_think_fixed(model: GPT2Thinking, dataset: pd.DataFrame, m
     for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=n, desc="BenchmarkThinkFixed", ncols=100):
         q_toks = t.tensor(row.question_toks)
         ans_tok = row.answer_tok  # Single token
-        q_len = row.question_len
 
         rollout = q_toks.clone()
         with t.no_grad():
-            # Generate exactly think_len thinking tokens
             for i in range(think_len):
                 logits = model(rollout).squeeze()
-                logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1)
-                think_tok = logprobs[-1].argmax().item() + model.cfg.d_normal_vocab
+                print(red, logits.shape, endc)
+                think_tok = logits[-1, model.cfg.d_normal_vocab:].argmax().item() + model.cfg.d_normal_vocab
                 rollout = t.cat([rollout, t.tensor([think_tok], device=rollout.device)])
             
-            # Add mandatory end_thought token
             rollout = t.cat([rollout, t.tensor([model.end_thought], device=rollout.device)])
-            
-            # Predict answer token
             logits = model(rollout).squeeze()
             logprobs = t.log_softmax(logits[..., :model.cfg.d_normal_vocab], dim=-1)
             ans_logprob = logprobs[-1, ans_tok]
@@ -162,7 +156,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             t.save(model.state_dict(), f"saves/add_think_fixed_{b}.pt")
 
 INPUT_MAX = 100
-NUM_EXAMPLES = 1_000_000
+NUM_EXAMPLES = 1_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
@@ -186,4 +180,4 @@ if __name__ == "__main__":
     trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
     train(model, training_cfg, trainset)
-    benchmark_addition_think_fixed(model, testset)
+    benchmark_addition_think_fixed(model, testset, training_cfg.think_len)

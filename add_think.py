@@ -53,8 +53,7 @@ def benchmark_addition_think(model: GPT2Thinking, dataset: pd.DataFrame, max_ans
                     think_tok = model.end_thought
                 else: 
                     logits = model(rollout).squeeze()
-                    logprobs = t.log_softmax(logits[..., model.cfg.d_normal_vocab:], dim=-1)
-                    think_tok = logprobs[-1].argmax().item() + model.cfg.d_normal_vocab
+                    think_tok = logits[-1, model.cfg.d_normal_vocab:].argmax().item() + model.cfg.d_normal_vocab
                 rollout = t.cat([rollout, t.tensor([think_tok], device=rollout.device)])
                 if think_tok == model.end_thought: break
             
