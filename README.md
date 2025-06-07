@@ -1,7 +1,10 @@
-- current todo:
-    - integrate search
-    - mask original question
-    - value net/value head that estimates accuracy given rollout
+- naming conventions:
+    - add: training a model for the toy task of modular addition
+    - think: uses thinking tokens
+    - fixed: instead of stopping thought rollouts once the model produces an end thought token, always sample a pre-set number of thinking tokens. runs about 20x faster.
+    - blind: produce thinking tokens like normal. But to actually produce the next token prediction, the model can only see the thinking tokens. forces thinking tokens to contain useful information.
+    - super(vised): Here, instead of training for the next token prediction task (the non-thinking task) using the sampled thought tokens from the model, we use manually generated thinking tokens. Isolates training difficulties to the RL part.
+    - search: search is used in the process of exploring the possible chains of thought during training.
 
 - addition task:
     - add_normal works.
