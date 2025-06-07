@@ -101,6 +101,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
         entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
 
+        rollout_mean_logprob = action_logprobs.mean(dim=-1)
+
         total_reward = (1 - cfg.think_reward_weight) * pred_reward_mean + cfg.think_reward_weight * think_reward_mean + cfg.entropy_reward_weight * entropy
         total_reward.backward()
 
@@ -124,16 +126,16 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
 
-        if b % 10_000 == 0:
+        if b % 50_000 == 0:
             print()
             print(red, correct_thoughts, endc)
             for row in range(rollouts.shape[0]):
-                # print question, proposed rollout, and logprob on correct:
-                print(f"{blue}{rollouts[row].tolist()} : {cyan}{pred_rewards[row].item():.3f} {green}({mc_pred_rewards[row].item():.3f})")
+                print(f"{blue}{rollouts[row].tolist()} [{rollout_mean_logprob[row].item():.3f}] : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f})")
             bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
+            benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
 
-        if b != 0 and b % 100_000 == 0:
-            benchmark_addition_think_fixed_blind(model, dataset, cfg.think_len)
+
+
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
 
@@ -143,7 +145,7 @@ if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=11)
     training_cfg = TrainingConfig(
         think_len=2,
-        group_size=32,
+        group_size=16,
         think_reward_weight=0.5,
         entropy_reward_weight=0.15,
         eps_decay=0.99999,

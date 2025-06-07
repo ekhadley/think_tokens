@@ -125,7 +125,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         pred_probs = t.exp(pred_rewards) # convert logprobs to probabilities
         pred_prob_var = pred_probs.var().item() # variance of the probabilities of the correct answer token
 
-        mean_num_think = sum([len(r) for r in rollouts]) / cfg.group_size - 4
+        mean_num_think = sum([len(r) for r in rollouts]) / cfg.group_size - q_len
         
         total_rewards, think_rewards, entropy_rewards = [], [], []
         for g in range(cfg.group_size): # we run the rollouts back through with gradients to get a differentiable reward

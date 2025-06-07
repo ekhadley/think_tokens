@@ -12,30 +12,23 @@ from utils import *
 
 class SimpleTokenizer:
     def __init__(self, max_int):
-        # Create vocabulary: integers 0 to max_int, then '+' and '='
-        self.vocab = [str(i) for i in range(max_int)] + ['+', '=']
+        # Create vocabulary: just integers 0 to max_int
+        self.vocab = [str(i) for i in range(max_int)]
         self.token_to_id = {token: i for i, token in enumerate(self.vocab)}
         self.id_to_token = {i: token for i, token in enumerate(self.vocab)}
         self.max_int = max_int
-        self.plus_token_id = len(self.vocab) - 2
-        self.equals_token_id = len(self.vocab) - 1
     
     def encode(self, s):
+        # For single numbers, return the token directly
+        if s.isdigit():
+            return [int(s)]
+        
+        # For pairs of numbers separated by space, return both tokens
+        parts = s.split()
         tokens = []
-        i = 0
-        while i < len(s):
-            if s[i] == '+':
-                tokens.append(self.plus_token_id)
-                i += 1
-            elif s[i] == '=':
-                tokens.append(self.equals_token_id)
-                i += 1
-            else:
-                num_str = ''
-                while i < len(s) and s[i].isdigit():
-                    num_str += s[i]
-                    i += 1
-                tokens.append(int(num_str))
+        for part in parts:
+            if part.isdigit():
+                tokens.append(int(part))
         return tokens
 
     def decode(self, ids):
@@ -49,11 +42,10 @@ def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.
     answer_tok = []  # Single token, not a list
 
     # Calculate all possible unique questions
-    all_questions = [f"{n1}+{n2}=" for n1 in range(int_max) for n2 in range(int_max)]
+    all_questions = [f"{n1} {n2}" for n1 in range(int_max) for n2 in range(int_max)]
     random.shuffle(all_questions)
     n_unique = len(all_questions)
-    crowded = n_questions > n_unique
-    if crowded:
+    if n_questions > n_unique:
         print("Warning: dataset will contain duplicates. Test set will remain unique.")
 
     # Determine split sizes
@@ -76,11 +68,11 @@ def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.
 
     def add_examples(questions):
         for question in questions:
-            n1, n2 = map(int, question[:-1].split('+'))
+            n1, n2 = map(int, question.split())
             answer = str((n1 + n2)%int_max)
             #answer = str(n1 + n2)
             toks = np.array(tokenizer.encode(question))
-            ans_tok = tokenizer.encode(answer)[0]  # Single token
+            ans_tok = tokenizer.encode(answer)[0]
             question_str.append(question)
             answer_str.append(answer)
             question_toks.append(toks)
@@ -192,7 +184,7 @@ NUM_EXAMPLES = 1_000_000
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
     
-    model_cfg = ModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab=INPUT_MAX + 2)
+    model_cfg = ModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab=INPUT_MAX)
     training_cfg = TrainingConfig(batch_size=16, lr=1e-3, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2(model_cfg)
 
