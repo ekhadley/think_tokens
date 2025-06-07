@@ -15,12 +15,12 @@ from add_normal import SimpleTokenizer, makeAdditionDataset
 from utils import *
 
 from add_think_search import allPossibleRollouts
+from add_think_fixed_blind import benchmark_addition_think_fixed_blind
 
 def bruteForceThoughtSearch(model: GPT2Thinking, ans_tok: int, max_steps: int) -> t.Tensor:
     with t.no_grad():
         print()
         perms = allPossibleRollouts(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1, max_steps)
-        #rollouts = t.cat([rollout.repeat(perms.shape[0], 1), perms], dim=1)
         rollouts = t.cat([perms, t.tensor([model.end_thought] * perms.shape[0]).unsqueeze(-1)], dim=1)
         logits = model(rollouts).squeeze()
         pred_logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
@@ -30,7 +30,7 @@ def bruteForceThoughtSearch(model: GPT2Thinking, ans_tok: int, max_steps: int) -
 
     return ans_logprobs
 
-def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
+def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, testset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
     scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
@@ -59,16 +59,23 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
             rollouts_no_question = rollouts[:, q_len:]
             logits = model(rollouts_no_question).squeeze()
-            logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1) # get the logprobs of the answer tokens
-            pred_rewards = logprobs[:, ans_tok]  # ans_tok is the single token ID
+            if True:
+                logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
+                pred_rewards = logprobs[:, ans_tok]
+                pred_reward_mean = pred_rewards.mean().item()
+                mc_pred_rewards = pred_rewards - pred_reward_mean
+                normed_pred_rewards = (mc_pred_rewards / (pred_rewards.std() + 1e-8))
+                pred_reward_var = pred_rewards.var().item()
+                pred_probs = t.exp(pred_rewards)
+                pred_prob_var = pred_probs.var().item()
+            else:
+                pred_rewards = logits[:, -1, ans_tok].softmax(dim=-1) 
+                pred_reward_mean = pred_rewards.mean().item()
+                normed_pred_rewards = pred_rewards - pred_reward_mean
+                
+                pred_reward_var = 0
+                pred_prob_var = pred_rewards.var().item()
 
-            pred_reward_mean = pred_rewards.mean().item() # mean logprob of correct answer token
-            mc_pred_rewards = pred_rewards - pred_reward_mean # mean centered rewards
-            normed_pred_rewards = (mc_pred_rewards / (pred_rewards.std() + 1e-8))
-            pred_reward_var = pred_rewards.var().item() # variance of the mean centered rewards
-            pred_probs = t.exp(pred_rewards) # convert logprobs to probabilities
-            pred_prob_var = pred_probs.var().item() # variance of the probabilities of the correct answer token
-        
         rollouts = rollouts.clone()
         normed_pred_rewards = normed_pred_rewards.clone()
         logits = model(rollouts).squeeze()
@@ -88,6 +95,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         weighted_think_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
         think_reward = weighted_think_logprobs.mean(dim=0) # mean over the group size
         think_reward_mean = think_reward.mean() # mean of the think rewards
+
+        rollout_mean_logprob = action_logprobs.mean(dim=-1)
 
         entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
 
@@ -110,32 +119,33 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "epsilon": 0,
                 "think_logprobs": action_logprobs,
                 "entropy_reward": entropy,
+                "think_loss": -rollout_mean_logprob.mean().item()
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}")
 
-        if b % 10_000 == 0:
+        if b % 50_000 == 0:
             print()
             print(red, correct_thoughts, endc)
             for row in range(rollouts.shape[0]):
-                # print question, proposed rollout, and logprob on correct:
-                print(f"{blue}{rollouts[row].tolist()} : {cyan}{pred_rewards[row].item():.3f} {green}({mc_pred_rewards[row].item():.3f})")
+                print(f"{blue}{rollouts[row].tolist()} [{rollout_mean_logprob[row].item():.3f}] : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f})")
             bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
+            benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
 
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
 
 if __name__ == "__main__":
-    t.set_default_device(t.device("cpu"))
+    t.set_default_device(t.device("cuda"))
 
     model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=11)
     training_cfg = TrainingConfig(
         think_len=2,
-        think_reward_weight=0.5,
+        think_reward_weight=0.9,
         entropy_reward_weight=0.15,
         batch_size=16,
         lr=1e-3,
-        weight_decay=1e-3,
+        weight_decay=1e-2,
         adam_beta1=0.9,
         adam_beta2=0.95
     )
@@ -144,4 +154,5 @@ if __name__ == "__main__":
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
     trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
-    train(model, training_cfg, trainset)
+    train(model, training_cfg, trainset, testset)
+    benchmark_addition_think_fixed_blind(model, testset, training_cfg.think_len)

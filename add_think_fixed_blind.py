@@ -15,20 +15,12 @@ from add_normal import SimpleTokenizer, makeAdditionDataset
 from utils import *
 
 def benchmark_addition_think_fixed_blind(model: GPT2Thinking, dataset: pd.DataFrame, think_len: int):
-    """
-    Benchmarks the thinking model's addition ability on a dataset using fixed-length thinking.
-    For each question, generates exactly 8 thinking tokens followed by end_thought, then predicts the answer token.
-    Returns:
-        - mean_logprob: mean logprob over correct answer tokens
-        - accuracy: fraction of exact matches using argmax sampling
-    """
     model.eval()
     total_logprob = 0.0
     total_tokens = 0
     correct = 0
-    n = len(dataset)
-    q_len = dataset.attrs['question_len']
-    for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=n, desc="BenchmarkThinkFixed", ncols=100):
+    q_len = dataset.attrs["question_len"]
+    for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=len(dataset), desc="BenchmarkThinkFixed", ncols=100):
         q_toks = t.tensor(row.question_toks)
         ans_tok = row.answer_tok  # Single token
 
@@ -36,14 +28,14 @@ def benchmark_addition_think_fixed_blind(model: GPT2Thinking, dataset: pd.DataFr
         with t.no_grad():
             for i in range(think_len):
                 logits = model(rollout).squeeze()
-                think_tok = logits[-1, model.cfg.d_normal_vocab:].argmax().item() + model.cfg.d_normal_vocab
-                rollout = t.cat([rollout, t.tensor([think_tok], device=rollout.device)])
+                think_tok = logits[-1, model.cfg.d_normal_vocab:].argmax() + model.cfg.d_normal_vocab
+                rollout = t.cat([rollout, think_tok.unsqueeze(0)])
             
-            rollout = t.cat([rollout, t.tensor([model.end_thought], device=rollout.device)]) # add end_thought token to the rollout
-            
-            logits = model(rollout[:, q_len:]).squeeze()
-            logprobs = t.log_softmax(logits[..., :model.cfg.d_normal_vocab], dim=-1)
-            ans_logprob = logprobs[-1, ans_tok]
+            rollout_no_question = rollout[q_len:]
+            rollout_no_question = t.cat([rollout_no_question, t.tensor([model.end_thought], device=rollout.device)])
+            logits = model(rollout_no_question).squeeze()
+            logprobs = t.log_softmax(logits[-1, :model.cfg.d_normal_vocab], dim=-1)
+            ans_logprob = logprobs[ans_tok]
             total_logprob += ans_logprob.item()
             total_tokens += 1
             
@@ -52,8 +44,8 @@ def benchmark_addition_think_fixed_blind(model: GPT2Thinking, dataset: pd.DataFr
             if generated == ans_tok:
                 correct += 1
     mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
-    accuracy = correct / n if n > 0 else float('nan')
-    print(f"[ThinkFixed] Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}")
+    accuracy = correct / len(dataset)
+    print(yellow, f"[ThinkFixed] Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}", endc)
     return mean_logprob, accuracy
 
 def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
@@ -147,7 +139,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             t.save(model.state_dict(), f"saves/add_think_fixed_blind{b}.pt")
         
         if b != 0 and b % 100_000 == 0:
-            benchmark_addition_think_fixed_blind(model, dataset)
+            benchmark_addition_think_fixed_blind(model, dataset, cfg.think_len)
 
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
@@ -174,4 +166,4 @@ if __name__ == "__main__":
     trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
     train(model, training_cfg, trainset)
-    benchmark_addition_think_fixed_blind(model, testset)
+    benchmark_addition_think_fixed_blind(model, testset, training_cfg.think_len)

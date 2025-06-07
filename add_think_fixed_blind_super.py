@@ -15,6 +15,7 @@ from add_normal import SimpleTokenizer, makeAdditionDataset
 from utils import *
 
 from add_think_search import allPossibleRollouts
+from add_think_fixed_blind import benchmark_addition_think_fixed_blind
 
 def bruteForceThoughtSearch(model: GPT2Thinking, ans_tok: int, max_steps: int) -> t.Tensor:
     with t.no_grad():
@@ -131,6 +132,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 print(f"{blue}{rollouts[row].tolist()} : {cyan}{pred_rewards[row].item():.3f} {green}({mc_pred_rewards[row].item():.3f})")
             bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
 
+        if b != 0 and b % 100_000 == 0:
+            benchmark_addition_think_fixed_blind(model, dataset, cfg.think_len)
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
 
@@ -157,3 +160,4 @@ if __name__ == "__main__":
     trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
     train(model, training_cfg, trainset)
+    benchmark_addition_think_fixed_blind(model, testset, training_cfg.think_len)
