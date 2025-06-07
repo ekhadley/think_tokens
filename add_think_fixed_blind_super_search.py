@@ -43,7 +43,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
 
     perms = allPossibleRollouts(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1, cfg.think_len)
     group_size = perms.shape[0]
-    end_thoughts = t.tensor([model.end_thought] * group_size, requires_grad=False).unsqueeze(-1)  # end_thought token for each group
+    end_thoughts = t.tensor([model.end_thought] * group_size, requires_grad=False).unsqueeze(-1) # end_thought token for each group
     perms = t.cat([perms, end_thoughts], dim=1)  # add end_thought token to each permutation
 
     group_indices = t.arange(group_size, requires_grad=False).unsqueeze(-1)
@@ -72,7 +72,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
                 pred_rewards = logits[:, -1, ans_tok].softmax(dim=-1) 
                 pred_reward_mean = pred_rewards.mean().item()
                 normed_pred_rewards = pred_rewards - pred_reward_mean
-                
                 pred_reward_var = 0
                 pred_prob_var = pred_rewards.var().item()
 
