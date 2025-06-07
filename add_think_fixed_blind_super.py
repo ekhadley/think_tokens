@@ -55,34 +55,31 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         with t.inference_mode(): # do inference without gradients to generate rollouts
             rollouts = q_toks.unsqueeze(0).repeat(cfg.group_size, 1)
             for i in range(cfg.think_len): # for each think token in the rollout. end_thought counts as a thought.
-                if random.random() < epsilon:
+                if random.random() < epsilon: # epsilon-greedy exploration sampling
                     think_toks = t.randint(model.cfg.d_normal_vocab, model.cfg.d_vocab_total - 1, (cfg.group_size, 1))
                 else:
                     logits = model(rollouts).squeeze()
-                    sample_probs = t.softmax((logits[:, -1, model.cfg.d_normal_vocab:]), dim=-1) # get logpprob distn over thinking token
+                    sample_probs = t.softmax((logits[:, -1, model.cfg.d_normal_vocab:-1]), dim=-1) # get logpprob distn over thinking token
                     think_toks = t.multinomial(sample_probs, num_samples=1) + model.cfg.d_normal_vocab # sample a thinking token
 
                 rollouts = t.cat([rollouts, think_toks], dim=1)
 
+            # generating the rewards for the thinking token rl
             rollouts = t.cat([rollouts, end_thoughts], dim=1)
             rollouts_no_question = rollouts[:, q_len:]
             logits = model(rollouts_no_question).squeeze()
             logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1) # get the logprobs of the answer tokens
             pred_rewards = logprobs[:, ans_tok]  # ans_tok is the single token ID
-
-            pred_reward_mean = pred_rewards.mean().item() # mean logprob of correct answer token
-            mc_pred_rewards = pred_rewards - pred_reward_mean # mean centered rewards
-            normed_pred_rewards = (mc_pred_rewards / (pred_rewards.std() + 1e-8))
-            pred_reward_var = pred_rewards.var().item() # variance of the mean centered rewards
-            pred_probs = t.exp(pred_rewards) # convert logprobs to probabilities
-            pred_prob_var = pred_probs.var().item() # variance of the probabilities of the correct answer token
+            pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
+            normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
             
             epsilon = max(epsilon * cfg.eps_decay, cfg.eps_min)
         
-        rollouts = rollouts.clone()
+        rollouts = rollouts.clone() # sampled rollouts but with gradients on
         normed_pred_rewards = normed_pred_rewards.clone()
         logits = model(rollouts).squeeze()
 
+        # manually creating the 'correct' chain of thought tokens
         ans_str = [model.cfg.d_normal_vocab + int(c) for c in str(row["answer"])]
         if len(ans_str) < 2: ans_str.insert(0, model.cfg.d_normal_vocab)
         ans_str.append(model.end_thought)
@@ -90,7 +87,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
         pred_logits = model(correct_thoughts).squeeze()
         pred_logprobs = t.log_softmax(pred_logits[-1, :model.cfg.d_normal_vocab], dim=-1) # real token logprob distn on the end_thought token
-        pred_reward = pred_logprobs[ans_tok]
+        pred_reward = pred_logprobs[ans_tok] # logprob value on the correct answer token
         pred_reward_mean = pred_reward
 
         think_logprobs = t.log_softmax(logits[group_indices, (think_indices - 1).unsqueeze(0), model.cfg.d_normal_vocab:], dim=-1) # logprob distns for each thinking token position
@@ -101,7 +98,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
         entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
 
-        rollout_mean_logprob = action_logprobs.mean(dim=-1)
 
         total_reward = (1 - cfg.think_reward_weight) * pred_reward_mean + cfg.think_reward_weight * think_reward_mean + cfg.entropy_reward_weight * entropy
         total_reward.backward()
@@ -110,6 +106,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             opt.step()
             scheduler.step()
             opt.zero_grad()
+
+            pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
+            pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging
 
             wandb.log({
                 "pred_reward": pred_reward_mean,
@@ -129,8 +128,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         if b % 50_000 == 0:
             print()
             print(red, correct_thoughts, endc)
+            rollout_mean_logprob = action_logprobs.mean(dim=-1)
             for row in range(rollouts.shape[0]):
-                print(f"{blue}{rollouts[row].tolist()} [{rollout_mean_logprob[row].item():.3f}] : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f})")
+                print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f})")
             bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
             benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
 
@@ -140,18 +140,18 @@ INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
 
 if __name__ == "__main__":
-    t.set_default_device(t.device("cpu"))
+    t.set_default_device(t.device("cuda"))
 
-    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=11)
+    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX, d_thought_vocab=11)
     training_cfg = TrainingConfig(
         think_len=2,
-        group_size=16,
+        group_size=32,
         think_reward_weight=0.5,
-        entropy_reward_weight=0.15,
+        entropy_reward_weight=0.05,
         eps_decay=0.99999,
         eps_min=0.01,
         batch_size=16,
-        lr=1e-3,
+        lr=3e-4,
         weight_decay=1e-3,
         adam_beta1=0.9,
         adam_beta2=0.95

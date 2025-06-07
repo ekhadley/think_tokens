@@ -153,7 +153,7 @@ NUM_EXAMPLES = 1_000
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
 
-    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX + 2, d_thought_vocab=10)
+    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX, d_thought_vocab=10)
     training_cfg = TrainingConfig(
         think_len=8,
         group_size=32,

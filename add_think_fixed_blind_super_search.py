@@ -59,21 +59,10 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
 
             rollouts_no_question = rollouts[:, q_len:]
             logits = model(rollouts_no_question).squeeze()
-            if True:
-                logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
-                pred_rewards = logprobs[:, ans_tok]
-                pred_reward_mean = pred_rewards.mean().item()
-                mc_pred_rewards = pred_rewards - pred_reward_mean
-                normed_pred_rewards = (mc_pred_rewards / (pred_rewards.std() + 1e-8))
-                pred_reward_var = pred_rewards.var().item()
-                pred_probs = t.exp(pred_rewards)
-                pred_prob_var = pred_probs.var().item()
-            else:
-                pred_rewards = logits[:, -1, ans_tok].softmax(dim=-1) 
-                pred_reward_mean = pred_rewards.mean().item()
-                normed_pred_rewards = pred_rewards - pred_reward_mean
-                pred_reward_var = 0
-                pred_prob_var = pred_rewards.var().item()
+            logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
+            pred_rewards = logprobs[:, ans_tok]
+            pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
+            normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
 
         rollouts = rollouts.clone()
         normed_pred_rewards = normed_pred_rewards.clone()
@@ -95,8 +84,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
         think_reward = weighted_think_logprobs.mean(dim=0) # mean over the group size
         think_reward_mean = think_reward.mean() # mean of the think rewards
 
-        rollout_mean_logprob = action_logprobs.mean(dim=-1)
-
         entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
 
         total_reward = (1 - cfg.think_reward_weight) * pred_reward_mean + cfg.think_reward_weight * think_reward_mean + cfg.entropy_reward_weight * entropy
@@ -106,6 +93,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
             opt.step()
             scheduler.step()
             opt.zero_grad()
+
+            pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging
+            pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
 
             wandb.log({
                 "pred_reward": pred_reward_mean,
@@ -123,11 +113,12 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}")
 
-        if b % 50_000 == 0:
+        if b % 32_000 == 0:
             print()
             print(red, correct_thoughts, endc)
+            rollout_mean_logprob = action_logprobs.mean(dim=-1)
             for row in range(rollouts.shape[0]):
-                print(f"{blue}{rollouts[row].tolist()} [{rollout_mean_logprob[row].item():.3f}] : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f})")
+                print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f})")
             bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
             benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
 
