@@ -156,6 +156,8 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
     input_max = dataset.attrs["input_max"]
     wandb.init(project="add_thoughtful", name=f"normal_{input_max}", config=cfg)
     wandb.watch(model, log="all")
+    wandb.config.update(model.cfg.to_dict())
+    wandb.config.update(cfg.to_dict())
 
     for b in (tr:=tqdm.trange(0, len(dataset), cfg.batch_size, ncols=100)):
         q_toks = t.tensor(np.stack(dataset.iloc[b:b+cfg.batch_size]['question_toks']))

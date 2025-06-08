@@ -81,6 +81,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     input_max = dataset.attrs["input_max"]
     wandb.init(project="add_thoughtful_think", name=f"think_nothink_{input_max}", config=cfg)
     wandb.watch(model, log="all")
+    wandb.config.update(model.cfg.to_dict())
+    wandb.config.update(cfg.to_dict())
 
     q_len = dataset.attrs["question_len"]
 

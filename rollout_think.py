@@ -101,7 +101,8 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
     wandb.init(project="thoughtful", name="gpt2s_think_ref_lgts_H_pen", config=cfg)
     wandb.watch(model, log="all")
     completions_table = wandb.Table(columns=['completion'])
-    #wandb.log({"sample_completions": completions_table})
+    wandb.config.update(model.cfg.to_dict())
+    wandb.config.update(cfg.to_dict())
 
     #ref_model_name = "meta-llama/Meta-Llama-3.1-8b"
     ref_model_name = "openai-community/gpt2-xl"

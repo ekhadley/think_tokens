@@ -70,6 +70,8 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
 
     wandb.init(project="thoughtful", name="gpt2s_normal", config=cfg)
     wandb.watch(model, log="all")
+    wandb.config.update(model.cfg.to_dict())
+    wandb.config.update(cfg.to_dict())
 
     sample_completion = model.yap("George Washington was")
     print(yellow, sample_completion, endc)

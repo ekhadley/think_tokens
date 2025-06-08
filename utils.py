@@ -37,6 +37,9 @@ class ModelConfig:
     n_layers: int = 6
     d_vocab: int = 50257
     seq_len: int = 512
+    
+    def to_dict(self):
+        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
 @dataclass
 class ThinkingModelConfig:
@@ -51,6 +54,11 @@ class ThinkingModelConfig:
     
     def __post_init__(self):
         self.d_vocab_total = self.d_normal_vocab + self.d_thought_vocab
+    
+    def to_dict(self):
+        d = {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        d['d_vocab_total'] = self.d_vocab_total
+        return d
 
 @dataclass
 class TrainingConfig:
@@ -68,6 +76,9 @@ class TrainingConfig:
     prob_force_end_thought: float = 1.0
     eps_decay: float = 0.999995
     eps_min: float = 0.05
+    
+    def to_dict(self):
+        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
 
 def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:

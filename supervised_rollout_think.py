@@ -73,7 +73,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: datasets.Dataset):
     wandb.init(project="thoughtful", name="gpt2s_supervised_rollout", config=cfg)
     wandb.watch(model, log="all")
     completions_table = wandb.Table(columns=['completion'])
-    #wandb.log({"sample_completions": completions_table})
+    wandb.config.update(model.cfg.to_dict())
+    wandb.config.update(cfg.to_dict())
     
     seq_len = model.cfg.seq_len
     seq_indices = t.arange(seq_len - 1, dtype=t.int32)

@@ -1,10 +1,17 @@
 - naming conventions:
     - add: training a model for the toy task of modular addition
     - think: uses thinking tokens
-    - fixed: instead of stopping thought rollouts once the model produces an end thought token, always sample a pre-set number of thinking tokens. runs about 20x faster.
-    - blind: produce thinking tokens like normal. But to actually produce the next token prediction, the model can only see the thinking tokens. forces thinking tokens to contain useful information.
-    - super(vised): Here, instead of training for the next token prediction task (the non-thinking task) using the sampled thought tokens from the model, we use manually generated thinking tokens. Isolates training difficulties to the RL part.
-    - search: search is used in the process of exploring the possible chains of thought during training.
+        - fixed: instead of stopping thought rollouts once the model produces an end thought token, always sample a pre-set number of thinking tokens. runs about 20x faster.
+        - blind: produce thinking tokens like normal. But to actually produce the next token prediction, the model can only see the thinking tokens. forces thinking tokens to contain useful information.
+        - super(vised): Here, instead of training for the next token prediction task (the non-thinking task) using the sampled thought tokens from the model, we use manually generated thinking tokens. Isolates training difficulties to the RL part.
+            - clean: the rl loss signal is hand crafted in some way. Probably giving 0 reward to wrong reasoning traces, positive constant to others.
+        - search: search is used in the process of exploring the possible chains of thought during training.
+
+- blind + super + clean + search works.
+    - The thinking policy does steadily learn the correct thinking tokens to output when given a clean loss signal only perfectly correct outputs. not so surprising.
+    - So what should we loosen first?
+        - my inclination is to figure out a usable reward 
+        - second thing would be 
 
 - addition task:
     - add_normal works.
