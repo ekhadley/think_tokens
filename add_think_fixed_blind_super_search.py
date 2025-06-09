@@ -67,7 +67,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
 
             rollouts_no_question = rollouts[:, q_len:]
             logits = model(rollouts_no_question).squeeze()
-            logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
+            #logprobs = t.log_softmax(logits[:, -1, :model.cfg.d_normal_vocab], dim=-1)
             #pred_rewards = logprobs[:, ans_tok]
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
@@ -79,7 +79,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
         normed_pred_rewards = normed_pred_rewards.clone()
         logits = model(rollouts).squeeze()
 
-        pred_logits = model(correct_thoughts).squeeze()
+        #pred_logits = model(correct_thoughts).squeeze() #######################
+        pred_logits = model(t.tensor(ans_tok).unsqueeze(0).repeat(rollouts.shape[0], 1)).squeeze() ########################
+
         pred_logprobs = t.log_softmax(pred_logits[-1, :model.cfg.d_normal_vocab], dim=-1) # real token logprob distn on the end_thought token
         pred_reward = pred_logprobs[ans_tok]
         pred_reward_mean = pred_reward
@@ -150,8 +152,8 @@ if __name__ == "__main__":
     model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX, d_thought_vocab=11)
     training_cfg = TrainingConfig(
         think_len=3,
-        think_reward_weight=0.5,
-        entropy_reward_weight=0.03,
+        think_reward_weight=0.0,
+        entropy_reward_weight=0.01,
         batch_size=16,
         lr=1e-3,
         weight_decay=1e-6,

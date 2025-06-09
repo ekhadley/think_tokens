@@ -4,23 +4,25 @@
     - *add*: training a model for the toy task of modular addition
     - *think*: uses thinking tokens
         - *fixed*: instead of stopping thought rollouts once the model produces an end thought token, always sample a pre-set number of thinking tokens. runs about 20x faster.
-        - *blind*: produce thinking tokens like normal. But to actually produce the next token prediction, the model can only see the thinking tokens. forces thinking tokens to contain useful information.
+        - *blind*: produce thinking tokens like normal. But to actually produce the next token prediction, the model can only see the thinking tokens, not the question. forces thinking tokens to contain useful information.
         - *super(vised)*: Here, instead of training for the next token prediction task (the non-thinking task) using the sampled thought tokens from the model, we use manually generated thinking tokens. Isolates training difficulties to the RL part.
             - This just makes it so that right from the start there is a 'correct' chain of thought for each question.
             - *clean*: the rl loss signal is hand crafted in some way. Probably giving 0 reward to wrong reasoning traces, positive constant to others.
         - *search*: search is used in the process of exploring the possible chains of thought during training.
 
-- blind + super + clean works.
+- blind + super + clean works for max=100. + search also works but is not necessary.
     - The thinking policy does steadily learn the correct thinking tokens to output when given a clean loss signal only perfectly correct outputs. not so surprising.
     - So what should we loosen first?
         - my inclination is to figure out how to do rewards properly. So that would be getting rid of 'clean'
 
+    - same combo does not work for 1000. The prediction policy can't even learn with supervised thinking sequences? bug?
+
 - This training method has several compounding levels of training difficulty
     - boostrapping problem. We have to learn to produce useful thinking tokens and learn to use thinking tokens simultaneously.
         - search
-        - separate the thinking and the rpedicting model
+        - separate the thinking policy and the predicting policy
     - noisy/sparse rewards. The signal for the thinking token rl will be fairly noisy, even when the answer producing policy is fully trained.
-        - train a value model alongside
+        - train a value model
     - potentially large action space
         - search
 
