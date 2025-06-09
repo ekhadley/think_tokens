@@ -61,7 +61,7 @@ def benchmark_addition_think_fixed(model: GPT2Thinking, dataset: pd.DataFrame, t
     return mean_logprob, accuracy
 
 
-def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
+def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, testset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
     scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
@@ -141,13 +141,14 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "pred_prob_var": pred_prob_var,
                 "prob_force_end_thought": 0.0,
                 "epsilon": epsilon,
-                "think_logprobs": action_logprobs,
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
 
         if b != 0 and b % 10_000 == 0:
             t.save(model.state_dict(), f"saves/add_think_fixed_{b}.pt")
+            _, benchmark_accuracy = benchmark_addition_think_fixed(model, testset, cfg.think_len)
+            wandb.log({"benchmark_accuracy": benchmark_accuracy})
 
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000
@@ -173,5 +174,5 @@ if __name__ == "__main__":
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
     trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
-    train(model, training_cfg, trainset)
+    train(model, training_cfg, trainset, testset)
     benchmark_addition_think_fixed(model, testset, training_cfg.think_len)

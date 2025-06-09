@@ -28,7 +28,7 @@ def benchmark_addition_think_fixed_blind(model: GPT2Thinking, dataset: pd.DataFr
         with t.no_grad():
             for i in range(think_len):
                 logits = model(rollout).squeeze()
-                think_tok = logits[-1, model.cfg.d_normal_vocab:].argmax() + model.cfg.d_normal_vocab
+                think_tok = logits[-1, model.cfg.d_normal_vocab:-1].argmax() + model.cfg.d_normal_vocab
                 rollout = t.cat([rollout, think_tok.unsqueeze(0)])
             
             rollout_no_question = rollout[q_len:]
@@ -131,17 +131,14 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "pred_prob_var": pred_prob_var,
                 "prob_force_end_thought": 0.0,
                 "epsilon": epsilon,
-                "think_logprobs": action_logprobs,
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
 
-        if b % 10_000 == 0:
-            #bruteForceThoughtSearch(rollouts[0][4:], model, ans_tok, cfg.think_len)
+        if b % 32_000 == 0:
             t.save(model.state_dict(), f"saves/add_think_fixed_blind{b}.pt")
-        
-        if b != 0 and b % 100_000 == 0:
-            benchmark_addition_think_fixed_blind(model, dataset, cfg.think_len)
+            _, benchmark_accuracy = benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
+            wandb.log({"benchmark_accuracy": benchmark_accuracy})
 
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000

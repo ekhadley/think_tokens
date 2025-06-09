@@ -22,7 +22,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
     input_max = dataset.attrs["input_max"]
-    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_clean{input_max}", config=cfg)
+    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super{input_max}", config=cfg)
     wandb.watch(model, log="all")
     wandb.config.update(model.cfg.to_dict())
     wandb.config.update(cfg.to_dict())
@@ -35,13 +35,15 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     group_indices = t.arange(cfg.group_size, requires_grad=False).unsqueeze(-1)
     think_indices = t.arange(q_len, q_len + cfg.think_len, requires_grad=False)
 
+    ndig = int(math.log10(input_max))
+
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
         row = dataset.iloc[b]
         q_toks = t.tensor(row["question_toks"])
         ans_tok = row["answer_tok"]  # Single token, not tensor
 
         ans_str = [model.cfg.d_normal_vocab + int(c) for c in str(row["answer"])] # manually creating the 'correct' chain of thought tokens
-        if len(ans_str) < 2: ans_str.insert(0, model.cfg.d_normal_vocab)
+        while len(ans_str) < ndig: ans_str.insert(0, model.cfg.d_normal_vocab)
         ans_str.append(model.end_thought)
         correct_thoughts = t.tensor(ans_str)
 
@@ -65,7 +67,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             #pred_rewards = logprobs[:, ans_tok]  # ans_tok is the single token ID
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
-            pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == correct_thoughts[:cfg.think_len]).all(dim=-1).float() * 10
+            pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == correct_thoughts[:cfg.think_len]).float().sum(dim=-1) * 50
             pred_reward_mean = pred_rewards.mean().item()
             normed_pred_rewards = pred_rewards
             
@@ -108,7 +110,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "pred_prob_var": pred_prob_var,
                 "prob_force_end_thought": 0.0,
                 "epsilon": epsilon,
-                "think_logprobs": action_logprobs,
+                "think_logprobs": think_logprobs[0],
                 "entropy_reward": entropy,
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
@@ -116,31 +118,33 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
         if b % 32_000 == 0:
             print()
+            print(red, ans_tok, endc)
             print(red, correct_thoughts, endc)
             rollout_mean_logprob = action_logprobs.mean(dim=-1)
             for row in range(rollouts.shape[0]):
-                print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f})")
-            bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
-            benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
+                print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f}){endc}")
+            #bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
+            _, benchmark_accuracy = benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
+            wandb.log({"benchmark_accuracy": benchmark_accuracy})
 
 
 
-INPUT_MAX = 100
-NUM_EXAMPLES = 1_000_000
+INPUT_MAX = 1_000
+NUM_EXAMPLES = 10_000_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
 
     model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX, d_thought_vocab=11)
     training_cfg = TrainingConfig(
-        think_len=2,
+        think_len=3,
         group_size=32,
         think_reward_weight=0.5,
-        entropy_reward_weight=0.05,
+        entropy_reward_weight=0.01,
         eps_decay=0.99999,
         eps_min=0.01,
-        batch_size=16,
-        lr=3e-4,
+        batch_size=32,
+        lr=1e-3,
         weight_decay=1e-3,
         adam_beta1=0.9,
         adam_beta2=0.95
@@ -148,7 +152,7 @@ if __name__ == "__main__":
     model = GPT2Thinking(model_cfg)
 
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
-    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
+    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.9999)
 
     train(model, training_cfg, trainset)
     benchmark_addition_think_fixed_blind(model, testset, training_cfg.think_len)
