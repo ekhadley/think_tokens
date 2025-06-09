@@ -1,17 +1,10 @@
-import math
 import tqdm
-import datasets
 import wandb
-import torch as t
-from torch import nn
-from transformers import GPT2TokenizerFast, AutoTokenizer
 import random
 import pandas as pd
-import numpy as np
-from eindex import eindex
+import torch as t
 
-from supervised_rollout_think import GPT2Thinking
-from add_normal import SimpleTokenizer, makeAdditionDataset
+from models import GPT2Thinking, ThinkingModelConfig, TrainingConfig
 from utils import *
 
 def benchmark_addition_think_fixed_blind(model: GPT2Thinking, dataset: pd.DataFrame, think_len: int):

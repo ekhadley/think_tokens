@@ -26,6 +26,12 @@
     - potentially large action space
         - search
 
+- splitting the answering policy and the thinking policy into two models is kind of like a variational autoencoder.
+    - read about autoencoders.
+
+- mixture of experts? Could have some experts be solely trained for thinking and others be solely trained for answering.
+    - Then the expert router can choose to think or not to think for each token.
+
 - addition task:
     - add_normal works.
     - add_think works but shows no sign of actually using the thinking tokens.

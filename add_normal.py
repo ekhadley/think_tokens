@@ -1,111 +1,13 @@
 import tqdm
-import datasets
 import wandb
 import torch as t
 from torch import nn
-import random
 import pandas as pd
 import numpy as np
-from eindex import eindex
-from normal import GPT2
+
+from models import GPT2, ModelConfig, TrainingConfig
 from utils import *
 
-class SimpleTokenizer:
-    def __init__(self, max_int):
-        # Create vocabulary: just integers 0 to max_int
-        self.vocab = [str(i) for i in range(max_int)]
-        self.token_to_id = {token: i for i, token in enumerate(self.vocab)}
-        self.id_to_token = {i: token for i, token in enumerate(self.vocab)}
-        self.max_int = max_int
-    
-    def encode(self, s):
-        # For single numbers, return the token directly
-        if s.isdigit():
-            return [int(s)]
-        
-        # For pairs of numbers separated by space, return both tokens
-        parts = s.split()
-        tokens = []
-        for part in parts:
-            if part.isdigit():
-                tokens.append(int(part))
-        return tokens
-
-    def decode(self, ids):
-        return ''.join([self.id_to_token[i] for i in ids])
-
-
-def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.0):
-    question_str = []
-    answer_str = []
-    question_toks = []
-    answer_tok = []  # Single token, not a list
-
-    # Calculate all possible unique questions
-    all_questions = [f"{n1} {n2}" for n1 in range(int_max) for n2 in range(int_max)]
-    random.shuffle(all_questions)
-    n_unique = len(all_questions)
-    if n_questions > n_unique:
-        print("Warning: dataset will contain duplicates. Test set will remain unique.")
-
-    # Determine split sizes
-    if train_split < 1.0:
-        n_test = int(n_questions * (1 - train_split))
-        n_train = n_questions - n_test
-    else:
-        n_test = 0
-        n_train = n_questions
-
-    # Assign test set from unique pool
-    test_questions = all_questions[:n_test]
-    train_questions = all_questions[n_test:n_unique]
-    # If more training examples are needed, sample with replacement from all unique questions
-    if n_train > len(train_questions):
-        extra_needed = n_train - len(train_questions)
-        train_questions += random.choices(all_questions, k=extra_needed)
-    else:
-        train_questions = train_questions[:n_train]
-
-    def add_examples(questions):
-        for question in questions:
-            n1, n2 = map(int, question.split())
-            answer = str((n1 + n2)%int_max)
-            #answer = str(n1 + n2)
-            toks = np.array(tokenizer.encode(question))
-            ans_tok = tokenizer.encode(answer)[0]
-            question_str.append(question)
-            answer_str.append(answer)
-            question_toks.append(toks)
-            answer_tok.append(ans_tok)
-
-    # Add training and test examples
-    add_examples(train_questions)
-    train_dataset = pd.DataFrame({
-        "question": question_str,
-        "answer": answer_str,
-        "question_toks": question_toks,
-        "answer_tok": answer_tok,
-    })
-    train_dataset.attrs['n_examples'] = n_questions
-    train_dataset.attrs['input_max'] = int_max
-    train_dataset.attrs['question_len'] = len(question_toks[0]) if train_questions else 0
-    if n_test > 0:
-        # Clear lists and add test examples
-        question_str.clear(); answer_str.clear(); question_toks.clear(); answer_tok.clear()
-        add_examples(test_questions)
-        test_dataset = pd.DataFrame({
-            "question": question_str,
-            "answer": answer_str,
-            "question_toks": question_toks,
-            "answer_tok": answer_tok,
-        })
-        test_dataset.attrs['n_examples'] = n_questions
-        test_dataset.attrs['input_max'] = int_max
-        test_dataset.attrs['question_len'] = len(question_toks[0]) if test_questions else 0
-        return train_dataset, test_dataset
-    else:
-        train_dataset.to_pickle(f"datasets/additions_{int_max}_{n_questions}.pkl")
-        return train_dataset
 
 def benchmark_addition(model: GPT2, dataset: pd.DataFrame, max_answer_len: int = 10):
     """

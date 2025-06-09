@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+import random
 import torch as t
 from torch import nn
 from torch.nn import functional as F
@@ -6,7 +6,7 @@ import datasets
 import numpy as np
 import plotly
 import plotly.express as px
-from transformers import GPT2TokenizerFast, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import GPT2TokenizerFast
 
 purple = '\x1b[38;2;255;0;255m'
 blue = '\x1b[38;2;0;0;255m'
@@ -26,60 +26,104 @@ underline = '\033[4m'
 endc = '\033[0m'
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
+t.set_printoptions(sci_mode=False)
 
-@dataclass
-class ModelConfig:
-    d_model: int = 512
-    seq_len: int = 512
-    d_mlp: int = 2048
-    d_head: int = 64
-    n_heads: int = 8
-    n_layers: int = 6
-    d_vocab: int = 50257
-    seq_len: int = 512
+class SimpleTokenizer:
+    def __init__(self, max_int):
+        # Create vocabulary: just integers 0 to max_int
+        self.vocab = [str(i) for i in range(max_int)]
+        self.token_to_id = {token: i for i, token in enumerate(self.vocab)}
+        self.id_to_token = {i: token for i, token in enumerate(self.vocab)}
+        self.max_int = max_int
     
-    def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+    def encode(self, s):
+        # For single numbers, return the token directly
+        if s.isdigit():
+            return [int(s)]
+        
+        # For pairs of numbers separated by space, return both tokens
+        parts = s.split()
+        tokens = []
+        for part in parts:
+            if part.isdigit():
+                tokens.append(int(part))
+        return tokens
 
-@dataclass
-class ThinkingModelConfig:
-    d_model: int = 512
-    seq_len: int = 512
-    d_mlp: int = 2048
-    d_head: int = 64
-    n_heads: int = 8
-    n_layers: int = 8
-    d_normal_vocab: int = 50257
-    d_thought_vocab: int = 2048
-    
-    def __post_init__(self):
-        self.d_vocab_total = self.d_normal_vocab + self.d_thought_vocab
-    
-    def to_dict(self):
-        d = {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
-        d['d_vocab_total'] = self.d_vocab_total
-        return d
+    def decode(self, ids):
+        return ''.join([self.id_to_token[i] for i in ids])
 
-@dataclass
-class TrainingConfig:
-    batch_size: int = 32
-    lr: float = 3e-4
-    weight_decay: float = 1e-1
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.95
-    gamma: float = 0.95
 
-    think_len: int = 8
-    group_size: int = 16
-    think_reward_weight: float = 0.0
-    entropy_reward_weight: float = 0.0
-    prob_force_end_thought: float = 1.0
-    eps_decay: float = 0.999995
-    eps_min: float = 0.05
-    
-    def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.0):
+    question_str = []
+    answer_str = []
+    question_toks = []
+    answer_tok = []  # Single token, not a list
 
+    # Calculate all possible unique questions
+    all_questions = [f"{n1} {n2}" for n1 in range(int_max) for n2 in range(int_max)]
+    random.shuffle(all_questions)
+    n_unique = len(all_questions)
+    if n_questions > n_unique:
+        print("Warning: dataset will contain duplicates. Test set will remain unique.")
+
+    # Determine split sizes
+    if train_split < 1.0:
+        n_test = int(n_questions * (1 - train_split))
+        n_train = n_questions - n_test
+    else:
+        n_test = 0
+        n_train = n_questions
+
+    # Assign test set from unique pool
+    test_questions = all_questions[:n_test]
+    train_questions = all_questions[n_test:n_unique]
+    # If more training examples are needed, sample with replacement from all unique questions
+    if n_train > len(train_questions):
+        extra_needed = n_train - len(train_questions)
+        train_questions += random.choices(all_questions, k=extra_needed)
+    else:
+        train_questions = train_questions[:n_train]
+
+    def add_examples(questions):
+        for question in questions:
+            n1, n2 = map(int, question.split())
+            answer = str((n1 + n2)%int_max)
+            #answer = str(n1 + n2)
+            toks = np.array(tokenizer.encode(question))
+            ans_tok = tokenizer.encode(answer)[0]
+            question_str.append(question)
+            answer_str.append(answer)
+            question_toks.append(toks)
+            answer_tok.append(ans_tok)
+
+    # Add training and test examples
+    add_examples(train_questions)
+    train_dataset = pd.DataFrame({
+        "question": question_str,
+        "answer": answer_str,
+        "question_toks": question_toks,
+        "answer_tok": answer_tok,
+    })
+    train_dataset.attrs['n_examples'] = n_questions
+    train_dataset.attrs['input_max'] = int_max
+    train_dataset.attrs['question_len'] = len(question_toks[0]) if train_questions else 0
+    if n_test > 0:
+        # Clear lists and add test examples
+        question_str.clear(); answer_str.clear(); question_toks.clear(); answer_tok.clear()
+        add_examples(test_questions)
+        test_dataset = pd.DataFrame({
+            "question": question_str,
+            "answer": answer_str,
+            "question_toks": question_toks,
+            "answer_tok": answer_tok,
+        })
+        test_dataset.attrs['n_examples'] = n_questions
+        test_dataset.attrs['input_max'] = int_max
+        test_dataset.attrs['question_len'] = len(question_toks[0]) if test_questions else 0
+        return train_dataset, test_dataset
+    else:
+        train_dataset.to_pickle(f"datasets/additions_{int_max}_{n_questions}.pkl")
+        return train_dataset
 
 def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
     logits = logits.squeeze() / temperature
@@ -112,7 +156,7 @@ def sampleLogprobs(logprobs: t.Tensor, temperature: float = 1.0, top_k: int = 0,
     probs = F.softmax(logprobs, dim=-1)
     return t.multinomial(probs, num_samples=1)
 
-def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg: ModelConfig, dataset_title, dataset_name, save_name: str, fraction: float = 1.0, pad=False):
+def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg, dataset_title, dataset_name, save_name: str, fraction: float = 1.0, pad=False):
     dataset = datasets.load_dataset(dataset_title, name=dataset_name, split="train").train_test_split(fraction)['test']
     if pad:
         dataset = dataset.map(lambda x: tokenizer(x['text'], padding='max_length', truncation=True, max_length=cfg.seq_len))
@@ -131,28 +175,6 @@ def loadTokenizedDataset(name: str):
     dataset = datasets.load_from_disk(f"datasets/{name}")
     dataset.set_format(type='torch')
     return dataset
-
-def LoadNormalModelAsThinking(normal_model: nn.Module, thinking_model_class, thinking_cfg: ThinkingModelConfig):
-    model = thinking_model_class(thinking_cfg)
-
-    # Copy transformer blocks and ln_f
-    model.blocks.load_state_dict(normal_model.blocks.state_dict())
-    model.ln_f.load_state_dict(normal_model.ln_f.state_dict())
-
-    # Resize embeddings and unembedding
-    resize_embedding(model.pos_embed, normal_model.pos_embed)
-    resize_embedding(model.embed, normal_model.embed)
-    resize_embedding(model.unembed, normal_model.unembed)
-
-    # Optionally copy tokenizer if needed
-    if hasattr(normal_model, 'tokenizer'):
-        model.tokenizer = normal_model.tokenizer
-
-    return model
-
-
-
-
 
 
 

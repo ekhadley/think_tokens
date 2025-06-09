@@ -1,18 +1,10 @@
-import math
 import tqdm
-import datasets
 import wandb
-import torch as t
-from torch import nn
-from transformers import GPT2TokenizerFast, AutoTokenizer
 import random
 import pandas as pd
-import numpy as np
-from eindex import eindex
+import torch as t
 
-from normal import GPT2
-from supervised_rollout_think import GPT2Thinking
-from add_normal import SimpleTokenizer, makeAdditionDataset
+from models import GPT2Thinking, TrainingConfig, ThinkingModelConfig
 from utils import *
 
 def printSeq(seq: t.Tensor, tokenizer, cfg: ThinkingModelConfig) -> None:

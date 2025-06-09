@@ -1,67 +1,10 @@
-import torch as t
-from torch import nn
-from torch.nn import functional as F
-from transformers import GPT2TokenizerFast
 import eindex
 import wandb
 import tqdm
 import datasets
 
 from utils import *
-
-class TransformerBlock(nn.Module):
-    def __init__(self, cfg: ModelConfig):
-        super(TransformerBlock, self).__init__()
-        self.attn = nn.MultiheadAttention(cfg.d_model, cfg.n_heads, batch_first=True)
-        self.norm1 = nn.LayerNorm(cfg.d_model)
-        self.linear1 = nn.Linear(cfg.d_model, cfg.d_mlp)
-        self.act = nn.ReLU()
-        self.linear2 = nn.Linear(cfg.d_mlp, cfg.d_model)
-        self.norm2 = nn.LayerNorm(cfg.d_model)
-    
-    def forward(self, x: t.Tensor) -> t.Tensor:
-        if x.ndim == 2: x = x.unsqueeze(0)
-        seq_len = x.shape[1]
-        attn_mask = t.triu(t.ones((seq_len, seq_len)), diagonal=1).bool()
-        attn_output, _ = self.attn(x, x, x, is_causal=True, attn_mask=attn_mask)
-        x = self.norm1(x + attn_output)
-        ff_output = self.linear2(self.act(self.linear1(x)))
-        x = self.norm2(x + ff_output)
-        return x
-
-class GPT2(nn.Module):
-    def __init__(self, cfg: ModelConfig):
-        super(GPT2, self).__init__()
-        self.cfg = cfg
-        self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
-        self.ln_f = nn.LayerNorm(cfg.d_model)
-        self.embed = nn.Embedding(cfg.d_vocab, cfg.d_model)
-        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
-        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
-
-        self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
-    
-    def encode(self, text):
-        return self.tokenizer.tokenize(text)
-    def decode(self, tokens):
-        return self.tokenizer.batch_decode(tokens)
-    def forward(self, x: t.Tensor) -> t.Tensor:
-        if x.ndim == 1: x = x.unsqueeze(0)
-        x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
-        for i, block in enumerate(self.blocks):
-            x = block(x)
-        x = self.ln_f(x)
-        x = self.unembed(x)
-        return x
-    def yap(self, prompt: str, max_length: int = 50):
-        with t.no_grad():
-            tokens = t.tensor(self.tokenizer(prompt).input_ids).squeeze()
-            for _ in range(max_length):
-                logits = self(tokens).squeeze()
-                next_token = sampleLogits(logits[-1], 0.9)
-                tokens = t.cat([tokens, next_token], dim=-1)
-        return "".join(self.tokenizer.batch_decode(tokens))
-
+from models import GPT2
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)

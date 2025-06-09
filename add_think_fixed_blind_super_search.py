@@ -1,17 +1,10 @@
 import math
 import tqdm
-import datasets
 import wandb
-import torch as t
-from torch import nn
-from transformers import GPT2TokenizerFast, AutoTokenizer
-import random
 import pandas as pd
-import numpy as np
-from eindex import eindex
+import torch as t
 
-from supervised_rollout_think import GPT2Thinking
-from add_normal import SimpleTokenizer, makeAdditionDataset
+from models import GPT2Thinking, TrainingConfig, ThinkingModelConfig
 from utils import *
 
 from add_think_search import allPossibleRollouts
@@ -149,13 +142,13 @@ if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
     t.set_printoptions(sci_mode=False)
 
-    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX, d_thought_vocab=11)
+    model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=6, d_normal_vocab=INPUT_MAX, d_thought_vocab=11)
     training_cfg = TrainingConfig(
         think_len=3,
         think_reward_weight=0.0,
         entropy_reward_weight=0.01,
         batch_size=16,
-        lr=1e-3,
+        lr=3e-4,
         weight_decay=1e-6,
         adam_beta1=0.9,
         adam_beta2=0.95

@@ -4,98 +4,90 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a research project exploring "thinking tokens" - a mechanism for transformer models to produce internal reasoning tokens before generating final outputs. The project implements and compares different training approaches for models that can use thinking tokens to improve their reasoning capabilities on tasks like arithmetic and language modeling.
+This is a research codebase exploring "thinking tokens" - training language models to use intermediate reasoning steps before producing final outputs. The primary task is modular addition, serving as a controlled environment to study different training approaches for thinking token models.
 
 ## Environment Setup
 
 ```bash
-# Dependencies managed via pipenv
-pipenv install
-pipenv shell
+# Use python directly - assumes pipenv environment is active
+python script_name.py
 
-# All scripts can be run directly with python
-python add_normal.py
-python add_think.py
-python add_think2.py
+# Example experiments
+python add_normal.py        # Baseline without thinking
+python add_think_fixed_blind_super.py  # Current best approach
 ```
 
-## Key Architecture Components
+## Architecture: Two-Vocabulary System
 
-### Model Types
-- **Normal GPT2** (`normal.py`): Standard transformer for baseline comparisons
-- **GPT2Thinking**: Extended transformer that can generate thinking tokens in addition to normal vocabulary tokens
-
-### Core Training Approaches
-1. **Normal Training** (`add_normal.py`): Standard supervised learning on addition tasks
-2. **Thinking Token Training** (`add_think.py`, `add_think2.py`): RL approach where models learn to use thinking tokens to improve prediction accuracy
-3. **Rollout Training** (`rollout_think.py`, `supervised_rollout_think.py`): Advanced RL training with reference models and discounted rewards
+### Core Components
+- **Standard GPT-2** (`normal.py`): Baseline transformer
+- **GPT2Thinking** (`supervised_rollout_think.py`): Extended model with dual vocabulary
+  - Normal tokens (0 to `d_normal_vocab-1`): Regular text/numbers
+  - Thinking tokens (`d_normal_vocab` to `d_vocab_total-2`): Internal reasoning
+  - Special `end_thought` token: Transition from thinking to answering
 
 ### Configuration Classes
-- `ModelConfig`: Standard transformer configuration 
-- `ThinkingModelConfig`: Extended config with separate vocabularies for normal tokens (`d_normal_vocab`) and thinking tokens (`d_thought_vocab`)
-- `TrainingConfig`: Training hyperparameters including RL-specific settings like `gamma` for reward discounting
+- `ModelConfig`: Standard transformer settings
+- `ThinkingModelConfig`: Adds `d_thought_vocab` for thinking token count
+- `TrainingConfig`: RL hyperparameters including exploration epsilon
 
-## Running Experiments
+## Experiment Progression (by complexity)
 
-### Addition Task Experiments
-```bash
-# Normal model baseline
-python add_normal.py
+### Baseline
+- `add_normal.py`: Standard supervised learning on addition
 
-# Thinking token models with RL training
-python add_think.py
-python add_think2.py
-```
+### Thinking Token Variants
+- `add_think.py`: Basic variable-length thinking sequences
+- `add_think_fixed.py`: Fixed-length thinking sequences (~20x faster)
+- `add_think_fixed_blind.py`: Model only sees thinking tokens during prediction
+- `add_think_fixed_blind_super.py`: Uses manually crafted correct thinking sequences
+- `add_think_fixed_blind_super_search.py`: Adds exhaustive search over thinking space
 
-### Language Model Training
-```bash
-# Normal transformer baseline
-python normal.py
+### Current Best Practice
+The "blind + supervised + clean rewards" approach works for max=100 problems. The naming convention isolates specific training difficulties:
+- **fixed**: Predetermined thinking sequence length
+- **blind**: Force reliance on thinking tokens by hiding original question
+- **super**: Provide correct thinking sequences for supervision
+- **search**: Exhaustive exploration of thinking possibilities
 
-# Thinking token transformer with rollout training
-python rollout_think.py
+## Key Training Patterns
 
-# Supervised rollout approach
-python supervised_rollout_think.py
-```
+### Reinforcement Learning Setup
+- Group-based training: Multiple rollouts per question for variance estimation
+- Epsilon-greedy exploration: Balance random vs model-generated tokens  
+- Reward structure: Mean-centered across groups, with entropy bonus
+- Credit assignment: Think token rewards weighted by prediction accuracy
 
-## Key Utilities
+### Dataset Generation
+- `makeAdditionDataset()`: Creates modular addition problems
+- Configurable difficulty via `input_max` parameter
+- Dataset stores metadata globally rather than per-sample for efficiency
 
-### Dataset Creation
-- `SimpleTokenizer`: Custom tokenizer for arithmetic tasks 
-- `makeAdditionDataset()`: Generates addition problem datasets with configurable difficulty
-- Dataset attributes store metadata like `input_max`, `question_len` instead of per-row fields for efficiency
+### Evaluation Functions
+- `benchmark_addition_think_*()`: Specialized benchmarks for different thinking approaches
+- Color-coded output: Blue (normal), Cyan (thinking), Magenta (special tokens)
 
-### Model Loading/Saving
-- `loadModel()`: Load saved model checkpoints from `saves/` directory
-- `LoadNormalModelAsThinking()`: Convert normal models to thinking token models by expanding vocabularies
+## Utilities (`utils.py`)
 
-### Evaluation
-- `benchmark_addition()`: Evaluate normal model accuracy on addition tasks
-- `benchmark_addition_think()`: Specialized benchmark for thinking token models with rollout generation
+### Model Management
+- `loadModel()`: Load checkpoints from `saves/` directory
+- `LoadNormalModelAsThinking()`: Convert standard to thinking models
+- Plotting functions with custom `imshow()` for tensor visualization
 
-## Thinking Token Implementation Details
+### Key Dependencies
+- PyTorch + Transformers for model architecture
+- eindex for efficient tensor operations
+- wandb for experiment tracking
+- Custom tokenization for arithmetic tasks
 
-### Token Mechanics
-- Thinking tokens have IDs >= `d_normal_vocab` 
-- Special `end_thought` token (highest ID) signals end of reasoning phase
-- Models alternate between thinking phase (internal reasoning) and prediction phase (final output)
+## Research Insights
 
-### Training Rewards
-- **Prediction Reward**: Logprob of correct answer token - primary signal
-- **Think Reward**: Weighted by normalized prediction performance across rollouts
-- **Entropy Reward**: Encourages exploration in thinking token space to prevent collapse
+### Training Challenges
+1. **Bootstrap Problem**: Must learn to produce and use thinking tokens simultaneously
+2. **Sparse Rewards**: Final answer accuracy provides limited learning signal
+3. **Exploration**: Large thinking token action space requires careful exploration
 
-### Color-coded Visualization
-- Blue: Normal vocabulary tokens
-- Cyan: Thinking tokens (`<think{id}>`)
-- Magenta: Special tokens like `<end_thought>`
-
-## Current Research Challenges
-
-Based on implementation, key open problems include:
-- Preventing models from ignoring thinking tokens during training
-- Proper credit assignment for which thinking tokens were actually useful
-- Balancing exploration vs exploitation in the large thinking token action space
-- Using reference models vs. mean performance for reward baselines
-- Optimizing parallel rollout generation for efficiency
+### Current Status
+- Works for small problems (max=100) with supervised approach
+- Scaling to larger problems (max=1000) reveals fundamental training difficulties
+- Next research direction: Improve reward structure beyond "clean" binary rewards
