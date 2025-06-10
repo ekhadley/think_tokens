@@ -3,6 +3,7 @@ import torch as t
 from torch import nn
 from torch.nn import functional as F
 import datasets
+import pandas as pd
 import numpy as np
 import plotly
 import plotly.express as px
@@ -26,7 +27,7 @@ underline = '\033[4m'
 endc = '\033[0m'
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
-t.set_printoptions(sci_mode=False)
+t.set_printoptions(sci_mode=False, linewidth=300)
 
 class SimpleTokenizer:
     def __init__(self, max_int):

@@ -41,9 +41,29 @@ class ThinkingModelConfig:
         return d
 
 @dataclass
+class SplitModelConfig:
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 6
+    d_vocab: int = 50257
+    seq_len: int = 512
+
+    d_vocab_in: int = 50257
+    d_vocab_out: int = 50257
+    d_thought_vocab: int = 2048
+    
+    def to_dict(self):
+        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+
+@dataclass
 class TrainingConfig:
     batch_size: int = 32
     lr: float = 3e-4
+    think_lr: float = None
+    answer_lr: float = None
     weight_decay: float = 1e-1
     adam_beta1: float = 0.9
     adam_beta2: float = 0.95
@@ -56,6 +76,7 @@ class TrainingConfig:
     prob_force_end_thought: float = 1.0
     eps_decay: float = 0.999995
     eps_min: float = 0.05
+
     
     def to_dict(self):
         return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
@@ -166,5 +187,31 @@ class GPT2Thinking(nn.Module):
         return out
     def printSeq(self, seq: t.Tensor) -> None:
         print("\n", self.seqStr(seq))
+
+
+class GPT2SplitModel(nn.Module):
+    def __init__(self, cfg: ModelConfig):
+        nn.Module.__init__(self)
+        self.cfg = cfg
+        self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
+        self.ln_f = nn.LayerNorm(cfg.d_model)
+        self.embed = nn.Embedding(cfg.d_vocab_in, cfg.d_model)
+        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
+        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_out, bias=False)
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        if x.ndim == 1: x = x.unsqueeze(0)
+        x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+        x = self.ln_f(x)
+        x = self.unembed(x)
+        return x
+
+def makeSplitThinkingModels(acfg: SplitModelConfig, tcfg: SplitModelConfig):
+    assert acfg.d_normal_vocab == tcfg.d_normal_vocab, "Normal vocab size must match"
+    assert acfg.d_thought_vocab == tcfg.d_thought_vocab, "Thought vocab size must match"
+
+
 
 

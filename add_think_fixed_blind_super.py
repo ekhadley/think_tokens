@@ -71,7 +71,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         normed_pred_rewards = normed_pred_rewards.clone()
         logits = model(rollouts).squeeze()
 
-        pred_logits = model(correct_thoughts).squeeze()
+        pred_logits = model(correct_thoughts).squeeze() ######################## just using the correct rollouts, not what we sampled. this is is 'super' part.
         pred_logprobs = t.log_softmax(pred_logits[-1, :model.cfg.d_normal_vocab], dim=-1) # real token logprob distn on the end_thought token
         pred_reward = pred_logprobs[ans_tok] # logprob value on the correct answer token
         pred_reward_mean = pred_reward
