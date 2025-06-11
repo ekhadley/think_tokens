@@ -61,7 +61,9 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             #pred_rewards = logprobs[:, ans_tok]  # ans_tok is the single token ID
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
-            pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == correct_thoughts[:cfg.think_len]).float().sum(dim=-1) * 50
+            
+            #pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == correct_thoughts[:cfg.think_len]).float().sum(dim=-1) * 50 ################ giving perfect reward signals. This is the 'clean' part.
+            pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == correct_thoughts[:cfg.think_len]).all(dim=-1).float() * 100 ################ giving perfect reward signals. This is the 'clean' part.
             pred_reward_mean = pred_rewards.mean().item()
             normed_pred_rewards = pred_rewards
             
@@ -71,7 +73,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         normed_pred_rewards = normed_pred_rewards.clone()
         logits = model(rollouts).squeeze()
 
-        pred_logits = model(correct_thoughts).squeeze() ######################## just using the correct rollouts, not what we sampled. this is is 'super' part.
+        pred_logits = model(correct_thoughts).squeeze() ######################## just using the correct rollouts, not what we sampled. this is is 'super' part. Also the rollouts do not contain the original question, which is the 'blind' part.
         pred_logprobs = t.log_softmax(pred_logits[-1, :model.cfg.d_normal_vocab], dim=-1) # real token logprob distn on the end_thought token
         pred_reward = pred_logprobs[ans_tok] # logprob value on the correct answer token
         pred_reward_mean = pred_reward
@@ -95,6 +97,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
             pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging
 
+            think_loss = action_logprobs[(pred_rewards > 0)].mean()
+
             wandb.log({
                 "pred_reward": pred_reward_mean,
                 "think_reward": think_reward_mean,
@@ -106,6 +110,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
                 "epsilon": epsilon,
                 "think_logprobs": think_logprobs[0],
                 "entropy_reward": entropy,
+                "think_loss": think_loss,
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
@@ -123,7 +128,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
 
 
-INPUT_MAX = 1_000
+INPUT_MAX = 100
 NUM_EXAMPLES = 10_000_000
 
 if __name__ == "__main__":
@@ -131,7 +136,7 @@ if __name__ == "__main__":
 
     model_cfg = ThinkingModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_normal_vocab=INPUT_MAX, d_thought_vocab=11)
     training_cfg = TrainingConfig(
-        think_len=3,
+        think_len=2,
         group_size=32,
         think_reward_weight=0.5,
         entropy_reward_weight=0.01,
@@ -139,7 +144,7 @@ if __name__ == "__main__":
         eps_min=0.01,
         batch_size=32,
         lr=1e-3,
-        weight_decay=1e-3,
+        weight_decay=2e-4,
         adam_beta1=0.9,
         adam_beta2=0.95
     )

@@ -99,6 +99,8 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
             pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
             rollout_mean_logprob = action_logprobs.mean(dim=-1)
 
+            think_loss = action_logprobs[(pred_rewards > 0)].mean()
+
             if b%1024 == 0:
                 correct_rollout_idx = normed_pred_rewards.argmax().item()
                 print()
@@ -122,6 +124,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
                 "epsilon": 0,
                 "think_logprobs": think_logprobs[0],
                 "entropy_reward": entropy,
+                "think_loss": think_loss,
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}")

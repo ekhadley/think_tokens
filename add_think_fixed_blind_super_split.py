@@ -96,7 +96,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
             #pred_rewards = (rollouts_no_question == correct_thoughts[:cfg.think_len]).float().sum(dim=-1) * 50
-            pred_rewards = (rollouts_no_question == correct_thoughts[:cfg.think_len]).all(dim=-1).float() * 50
+            pred_rewards = (rollouts_no_question == correct_thoughts[:cfg.think_len]).all(dim=-1).float() * 100
             pred_reward_mean = pred_rewards.mean().item()
             normed_pred_rewards = pred_rewards
             
@@ -132,6 +132,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             
             total_reward = think_reward_total + pred_reward_mean
 
+            think_loss = action_logprobs[(pred_rewards > 0)].mean()
+            
             wandb.log({
                 "pred_reward": pred_reward_mean,
                 "think_reward": think_reward_mean,
@@ -143,6 +145,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 "epsilon": epsilon,
                 "think_logprobs": think_logprobs[0],
                 "entropy_reward": entropy,
+                "think_loss": think_loss,
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
@@ -169,9 +172,9 @@ if __name__ == "__main__":
     answer_model_cfg = SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_thought_vocab=d_thought_vocab, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX)
     think_model_cfg =  SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_thought_vocab=d_thought_vocab, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab)
     training_cfg = TrainingConfig(
-        think_lr=5e-4,
+        think_lr=1e-4,
         answer_lr=1e-4,
-        weight_decay=1e-6,
+        weight_decay=1e-3,
         entropy_reward_weight=0.01,
         think_len=2,
         group_size=32,
