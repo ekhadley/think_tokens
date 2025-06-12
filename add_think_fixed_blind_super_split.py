@@ -160,6 +160,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             #bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
             _, benchmark_accuracy = benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, cfg.think_len)
             wandb.log({"benchmark_accuracy": benchmark_accuracy})
+            t.save(answer_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_answer{b}.pth")
+            t.save(think_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_think{b}.pth")
 
 
 INPUT_MAX = 100
@@ -172,14 +174,14 @@ if __name__ == "__main__":
     answer_model_cfg = SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_thought_vocab=d_thought_vocab, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX)
     think_model_cfg =  SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_thought_vocab=d_thought_vocab, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab)
     training_cfg = TrainingConfig(
-        think_lr=1e-4,
-        answer_lr=1e-4,
-        weight_decay=1e-3,
+        think_lr=1e-3,
+        answer_lr=1e-3,
+        weight_decay=1e-6,
         entropy_reward_weight=0.01,
         think_len=2,
         group_size=32,
         eps_decay=0.999995,
-        eps_min=0.01,
+        eps_min=0.03,
         batch_size=16,
         adam_beta1=0.9,
         adam_beta2=0.95

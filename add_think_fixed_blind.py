@@ -36,6 +36,8 @@ def benchmark_addition_think_fixed_blind(model: GPT2Thinking, dataset: pd.DataFr
             generated = answer_logit.argmax().item()
             if generated == ans_tok:
                 correct += 1
+
+    print(lime, rollout, endc)
     mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
     accuracy = correct / len(dataset)
     print(yellow, f"[ThinkFixed] Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}", endc)

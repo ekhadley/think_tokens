@@ -16,7 +16,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
     scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
     input_max = dataset.attrs["input_max"]
-    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super{input_max}", config=cfg)
+    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_clean{input_max}", config=cfg)
     wandb.watch(model, log="all")
     wandb.config.update(model.cfg.to_dict())
     wandb.config.update(cfg.to_dict())
@@ -81,8 +81,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
         think_logprobs = t.log_softmax(logits[group_indices, (think_indices - 1).unsqueeze(0), model.cfg.d_normal_vocab:-1], dim=-1) # logprob distns for each thinking token position
         action_logprobs = think_logprobs[group_indices, think_indices - q_len, rollouts[:, think_indices] - model.cfg.d_normal_vocab] # logprob of the thinking tokens that were outputted
         weighted_think_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
-        think_reward = weighted_think_logprobs.mean(dim=0) # mean over the group size
-        think_reward_mean = think_reward.mean() # mean of the think rewards
+        think_reward_mean = weighted_think_logprobs.mean()
 
         entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
 
@@ -125,11 +124,12 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
             #bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
             _, benchmark_accuracy = benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)
             wandb.log({"benchmark_accuracy": benchmark_accuracy})
+            t.save(model.state_dict(), f"saves/add_think_fixed_blind_super_clean{b}.pth")
 
 
 
 INPUT_MAX = 100
-NUM_EXAMPLES = 10_000_000
+NUM_EXAMPLES = 1_000_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
@@ -140,11 +140,11 @@ if __name__ == "__main__":
         group_size=32,
         think_reward_weight=0.5,
         entropy_reward_weight=0.01,
-        eps_decay=0.99999,
+        eps_decay=0.999995,
         eps_min=0.01,
         batch_size=32,
         lr=1e-3,
-        weight_decay=2e-4,
+        weight_decay=1e-3,
         adam_beta1=0.9,
         adam_beta2=0.95
     )
