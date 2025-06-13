@@ -73,8 +73,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
         normed_pred_rewards = normed_pred_rewards.clone()
         logits = model(rollouts).squeeze()
 
-        #pred_logits = model(correct_thoughts).squeeze() #######################
-        pred_logits = model(t.tensor(ans_tok).unsqueeze(0).repeat(rollouts.shape[0], 1)).squeeze() ########################
+        pred_logits = model(correct_thoughts).squeeze()
 
         pred_logprobs = t.log_softmax(pred_logits[-1, :model.cfg.d_normal_vocab], dim=-1) # real token logprob distn on the end_thought token
         pred_reward = pred_logprobs[ans_tok]
@@ -121,8 +120,6 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
                 "num_think": cfg.think_len,
                 "pred_reward_var": pred_reward_var,
                 "pred_prob_var": pred_prob_var,
-                "prob_force_end_thought": 0.0,
-                "epsilon": 0,
                 "think_logprobs": think_logprobs[0],
                 "entropy_reward": entropy,
                 "think_loss": think_loss,
@@ -158,10 +155,7 @@ if __name__ == "__main__":
         adam_beta2=0.95
     )
     model = GPT2Thinking(model_cfg)
-
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
     trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
-    testset = trainset.sample(1000, random_state=42)
-
     train(model, training_cfg, trainset, testset)
     benchmark_addition_think_fixed_blind(model, testset, training_cfg.think_len)
