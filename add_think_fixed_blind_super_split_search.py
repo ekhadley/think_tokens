@@ -6,6 +6,7 @@ import pandas as pd
 import torch as t
 
 from models import GPT2SplitModel, TrainingConfig, SplitModelConfig
+from add_think_search import allPossibleRollouts
 from utils import *
 
 def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int):
@@ -45,8 +46,7 @@ def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, thi
 
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, dataset: pd.DataFrame):
     answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
-    #answer_scheduler = t.optim.lr_scheduler.CosineAnnealingLR(answer_opt, T_max=len(dataset)//cfg.batch_size)
-    answer_scheduler = t.optim.lr_scheduler.CosineAnnealingLR(answer_opt, T_max=2000)
+    answer_scheduler = t.optim.lr_scheduler.CosineAnnealingLR(answer_opt, T_max=len(dataset)//cfg.batch_size)
     
     think_opt = t.optim.AdamW(think_model.parameters(), lr=cfg.think_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
     think_scheduler = t.optim.lr_scheduler.CosineAnnealingLR(think_opt, T_max=len(dataset)//cfg.batch_size)
@@ -58,18 +58,20 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     d_vocab_total = input_max + think_model.cfg.d_thought_vocab
     end_thought = input_max + think_model.cfg.d_thought_vocab - 1
 
-    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_split{input_max}", config=cfg)
+    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_split_clean_search{input_max}", config=cfg)
     #wandb.config.update(answer_model.cfg.to_dict())
     #wandb.config.update(think_model.cfg.to_dict())
     #wandb.config.update(cfg.to_dict())
 
-    epsilon = 1.0 # prob of choosing random think token
-
-    group_indices = t.arange(cfg.group_size, requires_grad=False).unsqueeze(-1)
+    perms = allPossibleRollouts(d_normal_vocab, end_thought, cfg.think_len)
+    group_size = perms.shape[0]
+    end_thoughts = t.tensor([end_thought] * group_size, requires_grad=False).unsqueeze(-1) # end_thought token for each group
+    perms = t.cat([perms, end_thoughts], dim=1)  # add end_thought token to each permutation
+    group_indices = t.arange(group_size, requires_grad=False).unsqueeze(-1)
     think_indices = t.arange(q_len, q_len + cfg.think_len, requires_grad=False)
-    end_thoughts = t.tensor([end_thought] * cfg.group_size, requires_grad=False).unsqueeze(-1)  # end_thought token for each group
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
+
         row = dataset.iloc[b]
         q_toks = t.tensor(row["question_toks"])
         ans_tok = row["answer_tok"]  # Single token, not tensor
@@ -80,30 +82,20 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         correct_thoughts = t.tensor(ans_digits, requires_grad=False)
 
         with t.inference_mode(): # do inference without gradients to generate rollouts
-            rollouts = q_toks.unsqueeze(0).repeat(cfg.group_size, 1)
-            for i in range(cfg.think_len): # for each think token in the rollout.
-                if random.random() < epsilon: # epsilon-greedy exploration sampling
-                    think_toks = t.randint(d_normal_vocab, d_vocab_total - 1, (cfg.group_size, 1))
-                else:
-                    logits = think_model(rollouts).squeeze()
-                    sample_probs = t.softmax((logits[:, -1, :-1]), dim=-1) # get logpprob distn over thinking token
-                    think_toks = t.multinomial(sample_probs, num_samples=1) + d_normal_vocab # sample a thinking token. thinking model input expects thinking tokens in the range [d_normal_vocab, d_normal_vocab + d_thought_vocab)
-
-                rollouts = t.cat([rollouts, think_toks], dim=1)
+            rollouts = t.cat([q_toks.unsqueeze(0).repeat(group_size, 1), perms], dim=1)
             
-            rollouts = t.cat([rollouts, end_thoughts], dim=1)
-            rollouts_no_question = rollouts[:, q_len:] - d_normal_vocab # answering model input expects thinking tokens in the range [0, d_thought_vocab)
+            #rollouts_no_question = rollouts[:, q_len:] - d_normal_vocab # answering model input expects thinking tokens in the range [0, d_thought_vocab)
             #logits = answer_model(rollouts_no_question).squeeze()
             #logprobs = t.log_softmax(logits[:, -1], dim=-1)
             #pred_rewards = logprobs[:, ans_tok]  # ans_tok is the single token ID
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
-            #pred_rewards = (rollouts_no_question == correct_thoughts).float().sum(dim=-1) * 50
-            pred_rewards = (rollouts_no_question == correct_thoughts).all(dim=-1).float() * 100
+
+            pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == (correct_thoughts[:cfg.think_len] + d_normal_vocab)).all(dim=-1).float() * 1
+            #pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == (correct_thoughts[:cfg.think_len] + d_normal_vocab)).float().sum(dim=-1) * 1
             pred_reward_mean = pred_rewards.mean().item()
             normed_pred_rewards = pred_rewards
             
-            epsilon = max(epsilon * cfg.eps_decay, cfg.eps_min)
         
         rollouts = rollouts.clone() # sampled rollouts but with gradients on
         normed_pred_rewards = normed_pred_rewards.clone()
@@ -114,56 +106,60 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         pred_reward_mean = pred_reward
         pred_reward.backward()
 
-        think_logits = think_model(rollouts).squeeze()
-        think_logprobs = t.log_softmax(think_logits[group_indices, (think_indices - 1).unsqueeze(0)], dim=-1) # logprob distns for each thinking token position
-        action_logprobs = think_logprobs[group_indices, think_indices - q_len, rollouts[:, think_indices] - d_normal_vocab] # logprob of the thinking tokens that were outputted
-        weighted_action_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
-        think_reward = weighted_action_logprobs.mean(dim=0) # mean over the group size
-        think_reward_mean = think_reward.mean() # mean of the think rewards
-        entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
-        think_reward_total = entropy * cfg.entropy_reward_weight + think_reward_mean
-        think_reward_total.backward()
+        #think_logits = think_model(rollouts).squeeze()
+        #think_logprobs = t.log_softmax(think_logits[group_indices, (think_indices - 1).unsqueeze(0), :-1], dim=-1) # logprob distns for each thinking token position
+        #action_logprobs = think_logprobs[group_indices, think_indices - q_len, rollouts[:, think_indices] - d_normal_vocab] # logprob of the thinking tokens that were outputted
+        #print(red, action_logprobs[ans_tok], endc)
+        #weighted_action_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
+        #think_reward = weighted_action_logprobs.sum() # sum of the think rewards
+        
+        #qwe = rollouts[ans_tok]
+        #qwe[0] = qwe[2] - 100
+        #qwe[0] = 0
+        #qwe[1] = ans_tok
+        think_logits = think_model(rollouts[ans_tok]).squeeze()
+        think_logprobs = t.log_softmax(think_logits[..., :-1], dim=-1) # logprob distns for each thinking token position
+        think_loss = think_logprobs[1, ans_digits[0]] + think_logprobs[2, ans_digits[1]]
+        think_reward = think_loss
+        think_loss.backward()
+
+        #entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
+        #think_reward_total = entropy * cfg.entropy_reward_weight + think_reward
+        #think_reward_total.backward()
 
         if b != 0 and b % cfg.batch_size == 0:
             answer_opt.step()
-            answer_scheduler.step()
-            answer_opt.zero_grad()
             think_opt.step()
-            think_scheduler.step()
+            answer_opt.zero_grad()
             think_opt.zero_grad()
+            answer_scheduler.step()
+            think_scheduler.step()
 
             pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
             pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging
             
-            total_reward = think_reward_total + pred_reward_mean
-
-            think_loss = action_logprobs[(pred_rewards > 0)].mean()
+            #think_loss = action_logprobs[(pred_rewards > 0)].mean()
             
             wandb.log({
                 "pred_reward": pred_reward_mean,
-                "think_reward": think_reward_mean,
-                "total_reward": total_reward,
+                #"think_reward": think_reward,
                 "num_think": cfg.think_len,
                 "pred_reward_var": pred_reward_var,
                 "pred_prob_var": pred_prob_var,
-                "prob_force_end_thought": 0.0,
-                "epsilon": epsilon,
-                "think_logprobs": think_logprobs[0],
-                "entropy_reward": entropy,
-                "think_loss": think_loss,
+                "think_logprobs": think_logprobs[0].tolist(),
+                #"entropy_reward": entropy, ######################3
+                "think_loss": think_loss.item(),
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
-            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}, epsilon: {epsilon:.3f}")
+            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, think loss: {think_loss.item():.3f} think reward: {think_reward.item():.3f}")
 
         if b % 32_000 == 0:
             print()
-            print(red, ans_tok, endc)
-            print(red, correct_thoughts, endc)
-            print(yellow, pred_logits[-1].softmax(dim=-1), endc)
-            rollout_mean_logprob = action_logprobs.mean(dim=-1)
-            for row in range(rollouts.shape[0]):
-                print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f}){endc}")
-            #bruteForceThoughtSearch(model, ans_tok, cfg.think_len)
+            print(red, rollouts[ans_tok], endc)
+            #rollout_mean_logprob = think_loss.mean(dim=-1)
+            #for row in range(rollouts.shape[0]):
+                #print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f}){endc}")
+            print(green, think_logprobs, endc)
             _, benchmark_accuracy = benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, cfg.think_len)
             wandb.log({"benchmark_accuracy": benchmark_accuracy})
             t.save(answer_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_answer{b}.pth")
@@ -180,15 +176,12 @@ if __name__ == "__main__":
     answer_model_cfg = SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX, d_thought_vocab=d_thought_vocab)
     think_model_cfg =  SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
     training_cfg = TrainingConfig(
-        think_lr=1e-4,
-        answer_lr=1e-4,
-        weight_decay=1e-3,
-        entropy_reward_weight=0.01,
         think_len=2,
-        group_size=32,
-        eps_decay=0.999995,
-        eps_min=0.01,
+        think_lr=1e-3,
+        answer_lr=1e-3,
+        entropy_reward_weight=0.01,
         batch_size=16,
+        weight_decay=1e-3,
         adam_beta1=0.9,
         adam_beta2=0.95
     )
@@ -196,7 +189,7 @@ if __name__ == "__main__":
     think_model = GPT2SplitModel(think_model_cfg)
 
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
-    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.9999)
+    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.995)
 
     train(answer_model, think_model, training_cfg, trainset)
     benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, training_cfg.think_len)

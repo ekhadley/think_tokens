@@ -207,11 +207,3 @@ class GPT2SplitModel(nn.Module):
         x = self.ln_f(x)
         x = self.unembed(x)
         return x
-
-def makeSplitThinkingModels(acfg: SplitModelConfig, tcfg: SplitModelConfig):
-    assert acfg.d_normal_vocab == tcfg.d_normal_vocab, "Normal vocab size must match"
-    assert acfg.d_thought_vocab == tcfg.d_thought_vocab, "Thought vocab size must match"
-
-
-
-
