@@ -115,17 +115,16 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame, tests
             tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, total reward: {total_reward.item():.3f}, think reward: {think_reward_mean:.3f}")
 
         if b != 0 and b % 32_000 == 0:
-            correct_rollout_idx = normed_pred_rewards.argmax().item()
             print()
             print(orange, ans_tok, correct_thoughts, endc)
-            print(red, think_logprobs[correct_rollout_idx].T, endc)
+            print(red, think_logprobs[ans_tok].T, endc)
             policy_first_thought = think_logprobs[0, 0].argmax().item()
             policy_second_thought = think_logprobs[10*policy_first_thought, 1].argmax().item()
             #policy_third_thought = think_logprobs[policy_first_thought, 2].argmax().item()
             #guess = policy_first_thought * 100 + policy_second_thought * 10 + policy_third_thought
             guess = policy_first_thought * 10 + policy_second_thought
             print(f"{blue}policy guess: {guess}{endc}")
-            print(green, action_logprobs[correct_rollout_idx].T, endc)
+            print(green, action_logprobs[ans_tok].T, endc)
             #for row in range(rollouts.shape[0]):
                 #print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f}){endc}")
             _, benchmark_accuracy = benchmark_addition_think_fixed_blind(model, testset, cfg.think_len)

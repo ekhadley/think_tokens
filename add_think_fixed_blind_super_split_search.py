@@ -5,44 +5,10 @@ import random
 import pandas as pd
 import torch as t
 
-from models import GPT2SplitModel, TrainingConfig, SplitModelConfig
-from add_think_search import allPossibleRollouts
 from utils import *
-
-def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int):
-    answer_model.eval()
-    think_model.eval()
-    total_logprob = 0.0
-    total_tokens = 0
-    correct = 0
-    q_len = dataset.attrs["question_len"]
-    d_normal_vocab = dataset.attrs["input_max"]
-    for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=len(dataset), desc="BenchmarkThinkFixed", ncols=100):
-        q_toks = t.tensor(row.question_toks)
-        ans_tok = row.answer_tok
-
-        rollout = q_toks.clone()
-        with t.no_grad():
-            for i in range(think_len):
-                logits = think_model(rollout).squeeze()
-                think_tok = logits[-1].argmax() + d_normal_vocab
-                rollout = t.cat([rollout, think_tok.unsqueeze(0)])
-            
-            rollout_no_question = rollout[q_len:] - d_normal_vocab
-            logits = answer_model(rollout_no_question).squeeze()
-            logprobs = t.log_softmax(logits[-1], dim=-1)
-            ans_logprob = logprobs[ans_tok]
-            total_logprob += ans_logprob.item()
-            total_tokens += 1
-            generated = logprobs.argmax().item()
-
-            if generated == ans_tok:
-                correct += 1
-
-    mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
-    accuracy = correct / len(dataset)
-    print(yellow, f"[ThinkFixed] Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}", endc)
-    return mean_logprob, accuracy
+from models import GPT2SplitModel, TrainingConfig, SplitModelConfig
+from add_think_fixed_blind_super_split import benchmark_addition_think_fixed_blind_split
+from add_think_search import allPossibleRollouts
 
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, dataset: pd.DataFrame):
     answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
@@ -55,8 +21,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     ndig = int(math.log10(input_max))
     q_len = dataset.attrs["question_len"]
     d_normal_vocab = input_max
-    d_vocab_total = input_max + think_model.cfg.d_thought_vocab
-    end_thought = input_max + think_model.cfg.d_thought_vocab - 1
+    d_vocab_total = think_model.cfg.d_vocab_in
+    end_thought = think_model.cfg.d_vocab_in - 1
 
     wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_split_clean_search{input_max}", config=cfg)
     #wandb.config.update(answer_model.cfg.to_dict())
@@ -91,8 +57,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
 
-            pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == (correct_thoughts[:cfg.think_len] + d_normal_vocab)).all(dim=-1).float() * 1
-            #pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == (correct_thoughts[:cfg.think_len] + d_normal_vocab)).float().sum(dim=-1) * 1
+            pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == (correct_thoughts[:cfg.think_len] + d_normal_vocab)).all(dim=-1).float()
+            #pred_rewards = (rollouts[:, q_len:q_len + cfg.think_len] == (correct_thoughts[:cfg.think_len] + d_normal_vocab)).float().sum(dim=-1)
             pred_reward_mean = pred_rewards.mean().item()
             normed_pred_rewards = pred_rewards
             
@@ -106,23 +72,13 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         pred_reward_mean = pred_reward
         pred_reward.backward()
 
-        #think_logits = think_model(rollouts).squeeze()
-        #think_logprobs = t.log_softmax(think_logits[group_indices, (think_indices - 1).unsqueeze(0), :-1], dim=-1) # logprob distns for each thinking token position
-        #action_logprobs = think_logprobs[group_indices, think_indices - q_len, rollouts[:, think_indices] - d_normal_vocab] # logprob of the thinking tokens that were outputted
-        #print(red, action_logprobs[ans_tok], endc)
-        #weighted_action_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
-        #think_reward = weighted_action_logprobs.sum() # sum of the think rewards
+        think_logits = think_model(rollouts).squeeze()
+        think_logprobs = t.log_softmax(think_logits[group_indices, (think_indices - 1).unsqueeze(0), :-1], dim=-1) # logprob distns for each thinking token position
+        action_logprobs = think_logprobs[group_indices, think_indices - q_len, rollouts[:, think_indices] - d_normal_vocab] # logprob of the thinking tokens that were outputted
+        weighted_action_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
+        think_reward = weighted_action_logprobs.sum() # sum of the think rewards
+        think_reward.backward()
         
-        #qwe = rollouts[ans_tok]
-        #qwe[0] = qwe[2] - 100
-        #qwe[0] = 0
-        #qwe[1] = ans_tok
-        think_logits = think_model(rollouts[ans_tok]).squeeze()
-        think_logprobs = t.log_softmax(think_logits[..., :-1], dim=-1) # logprob distns for each thinking token position
-        think_loss = think_logprobs[1, ans_digits[0]] + think_logprobs[2, ans_digits[1]]
-        think_reward = think_loss
-        think_loss.backward()
-
         #entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
         #think_reward_total = entropy * cfg.entropy_reward_weight + think_reward
         #think_reward_total.backward()
@@ -142,16 +98,16 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             
             wandb.log({
                 "pred_reward": pred_reward_mean,
-                #"think_reward": think_reward,
+                "think_reward": think_reward,
                 "num_think": cfg.think_len,
                 "pred_reward_var": pred_reward_var,
                 "pred_prob_var": pred_prob_var,
                 "think_logprobs": think_logprobs[0].tolist(),
-                #"entropy_reward": entropy, ######################3
-                "think_loss": think_loss.item(),
+                #"entropy_reward": entropy,
+                "think_loss": think_reward.item(),
             })
             #printSeq(rollouts[0], simple_tokenizer, model.cfg)
-            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, think loss: {think_loss.item():.3f} think reward: {think_reward.item():.3f}")
+            tr.set_description(f"{magenta}pred reward mean: {pred_reward_mean:.3f}, think reward: {think_reward.item():.3f}")
 
         if b % 32_000 == 0:
             print()
@@ -159,7 +115,6 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             #rollout_mean_logprob = think_loss.mean(dim=-1)
             #for row in range(rollouts.shape[0]):
                 #print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f}){endc}")
-            print(green, think_logprobs, endc)
             _, benchmark_accuracy = benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, cfg.think_len)
             wandb.log({"benchmark_accuracy": benchmark_accuracy})
             t.save(answer_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_answer{b}.pth")
@@ -178,7 +133,7 @@ if __name__ == "__main__":
     training_cfg = TrainingConfig(
         think_len=2,
         think_lr=1e-3,
-        answer_lr=1e-3,
+        answer_lr=1e-4,
         entropy_reward_weight=0.01,
         batch_size=16,
         weight_decay=1e-3,

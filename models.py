@@ -190,7 +190,7 @@ class GPT2Thinking(nn.Module):
 
 
 class GPT2SplitModel(nn.Module):
-    def __init__(self, cfg: ModelConfig):
+    def __init__(self, cfg: SplitModelConfig):
         nn.Module.__init__(self)
         self.cfg = cfg
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
