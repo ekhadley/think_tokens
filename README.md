@@ -1,4 +1,12 @@
-- current direction: making things easier through different methods, isolating various training difficulties and figuring out what adjustments are necessary.
+- split working. Works about as well as the other methods
+- None of them work without supervised chains of thought
+- None of them work for int max of 1000
+- AEs work beucase gradients flow from the output, decoder, latent representation, encoder, and inputs.
+    - All the approaches here don't have that property becuase tokenization severs the gradients.
+    - Maybe this suggests we should focus on non-tokenized, continuous thoughts? cuz differentiable?
+        - Do the gradients flow the whole way?
+    - And just to check, a single normal model which has an attn mask to the question tokens wouldn't work, right?
+        - this does not capture the 
 
 - naming conventions:
     - *add*: training a model for the toy task of modular addition
@@ -16,6 +24,17 @@
         - my inclination is to figure out how to do rewards properly. So that would be getting rid of 'clean'
 
     - same combo does not work for 1000. The prediction policy can't even learn with supervised thinking sequences? bug?
+
+    - removing clean also technically works beucase you can just softmax to recover the clean reward signal.
+        - But this basically only works when the answering model knows whats going on, and probably only works in domains where perfect answers exist (so modular addition, but not general text prediction)
+
+    - Attempts to remove 'super':
+        - Hard. Both models seem to converge to a uniform distribution.
+        - Tried freezing the answer model to capture some noise/structure for the thinking model to pick up on, but nothing.
+        - A rephrasing of the difficulty here: we need these models to invent a language to talk to each other with.
+            - At first each model knows nothing. Ignoring noise, they basicalyl have no association between inputs and outputs.
+            - If one model is speaking language, the other can learn it easily. So how to get them to invent a language the other can learn?
+            - The reason an autoencoder can do  this is beucase gradients flow from output, through the decoder to intermediate result, through the encoder to the inputs.
 
 - This training method has several compounding levels of training difficulty
     - boostrapping problem. We have to learn to produce useful thinking tokens and learn to use thinking tokens simultaneously.
@@ -46,7 +65,7 @@
             - Can we encourage rollout variance somehow? like a reward penalty for being far from the mean?
                 - This is already built into the reward, obviously, since the rewards are mean centered.
                 - And if we encourage "having better accuracy than the mean accuracy of the group" as well as "have a very different accuracy than the mean accuracy of the group" it seems like the latter is much easier to optimize for. maybe?
-                - Encouraging high *probability* variance may work, due to the fact that this requires the probabilities in question to be close to 1. Like you can have huge logit variance but no prob variance if all the logits are very negative. But high probability variance can only be acheived if some of the logits are pretty high.
+                - Encouraging high *probability* variance may work, due to the fact that this requires the logprobs in question to be close to 0. Like you can have huge logprob variance but no prob variance if all the logits are very negative. But high probability variance can only be acheived if some of the logits are pretty high.
                     - verified by the fact that the highest prob variances ever logged were for the 10 max addition task, where the model can easily solve it without any thinking tokens.
                 - does loss based on sample variance even make any sense gradient-wise? 
                     - If we give rewards based on variance of prediction probabilities, this is telling the logits for below avg rollouts to be more negative, and for above average rollouts to be more positive. We already got dat. 

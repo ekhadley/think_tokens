@@ -4,7 +4,7 @@ import tqdm
 import datasets
 
 from utils import *
-from models import GPT2
+from models import GPT2, TrainingConfig, ModelConfig
 
 def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)

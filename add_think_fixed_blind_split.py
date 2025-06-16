@@ -64,12 +64,11 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     #wandb.config.update(cfg.to_dict())
 
     epsilon = 1.0 # prob of choosing random think token
+    answer_train_stop = 1e9
 
     group_indices = t.arange(cfg.group_size, requires_grad=False).unsqueeze(-1)
     think_indices = t.arange(q_len, q_len + cfg.think_len, requires_grad=False)
     end_thoughts = t.tensor([end_thought] * cfg.group_size, requires_grad=False).unsqueeze(-1) # end_thought token for each group
-
-    answer_train_stop = 1e9
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
         row = dataset.iloc[b]
@@ -93,15 +92,16 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
 
                 rollouts = t.cat([rollouts, think_toks], dim=1)
             
-            rollouts_no_question = t.cat([rollouts[:, q_len:] - d_normal_vocab, end_thoughts], dim=-1) # add end_thought token and shift token ids
+            rollouts = t.cat([rollouts, end_thoughts], dim=1)
+            rollouts_no_question = rollouts[:, q_len:] - d_normal_vocab # add end_thought token and shift token ids
             logits = answer_model(rollouts_no_question).squeeze()
             logprobs = t.log_softmax(logits[:, -1], dim=-1)
             pred_rewards = logprobs[:, ans_tok]  # ans_tok is the single token ID
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
             normed_pred_rewards = pred_rewards.softmax(dim=0)
-            pred_reward_mean = normed_pred_rewards.mean().item()
-
+            pred_reward_mean = pred_rewards.mean().item()
+            
             epsilon = max(epsilon * cfg.eps_decay, cfg.eps_min)
         
         rollouts = rollouts.clone() # sampled rollouts but with gradients on
@@ -109,8 +109,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         normed_pred_rewards = normed_pred_rewards.clone()
 
         if b < answer_train_stop:
-            pred_logits = answer_model(correct_thoughts).squeeze()
-            pred_logprobs = t.log_softmax(pred_logits[-1], dim=-1) # real token logprob distn on the end_thought token
+            pred_logits = answer_model(rollouts_no_question).squeeze()
+            pred_logprobs = t.log_softmax(pred_logits[:, -1], dim=-1) # real token logprob distn on the end_thought token
             pred_reward = pred_logprobs[:, ans_tok].sum() # logprob value on the correct answer token
             pred_reward.backward()
 
@@ -118,7 +118,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         think_logprobs = t.log_softmax(think_logits[group_indices, (think_indices - 1).unsqueeze(0), :-1], dim=-1) # logprob distns for each thinking token position
         action_logprobs = think_logprobs[group_indices, think_indices - q_len, rollouts[:, think_indices] - d_normal_vocab] # logprob of the thinking tokens that were outputted
         weighted_action_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
-        think_reward = weighted_action_logprobs.sum() # sum of the think rewards
+        think_reward = weighted_action_logprobs.sum() # mean over the group size
         think_reward.backward()
 
         #entropy = -(think_logprobs * t.exp(think_logprobs)).sum(dim=-1).mean()
@@ -130,7 +130,6 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 answer_opt.step()
                 answer_scheduler.step()
                 answer_opt.zero_grad()
-
             think_opt.step()
             think_scheduler.step()
             think_opt.zero_grad()
@@ -146,6 +145,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 "num_think": cfg.think_len,
                 "pred_reward_var": pred_reward_var,
                 "pred_prob_var": pred_prob_var,
+                "prob_force_end_thought": 0.0,
                 "epsilon": epsilon,
                 #"think_logprobs": think_logprobs[0],
                 #"entropy_reward": entropy,

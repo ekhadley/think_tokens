@@ -56,6 +56,8 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
     scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
     input_max = dataset.attrs["input_max"]
+    batch_indices = t.arange(cfg.batch_size, requires_grad=False)
+
     wandb.init(project="add_thoughtful", name=f"normal_{input_max}", config=cfg)
     wandb.watch(model, log="all")
     wandb.config.update(model.cfg.to_dict())
@@ -64,10 +66,9 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
     for b in (tr:=tqdm.trange(0, len(dataset), cfg.batch_size, ncols=100)):
         q_toks = t.tensor(np.stack(dataset.iloc[b:b+cfg.batch_size]['question_toks']))
         ans_toks = t.tensor(dataset.iloc[b:b+cfg.batch_size]['answer_tok'].to_numpy())
-        
-        batch_indices = t.arange(len(ans_toks), requires_grad=False)
 
-        logits = model.forward(q_toks).squeeze()
+        #logits = model.forward(q_toks).squeeze()
+        logits = model.forward(ans_toks.unsqueeze(-1))
         logprobs = t.log_softmax(logits, dim=-1)
 
         pred_logprobs = logprobs[batch_indices, -1, ans_toks]
@@ -82,13 +83,13 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
             tr.set_description(f"{magenta}loss: {loss.detach().item():.3f}")
             t.save(model.state_dict(), f"saves/add_normal{b}.pth")
 
-INPUT_MAX = 100
-NUM_EXAMPLES = 1_000_000
+INPUT_MAX = 1_000
+NUM_EXAMPLES = 10_000_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
     
-    model_cfg = ModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab=INPUT_MAX)
+    model_cfg = ModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=12, d_vocab=INPUT_MAX)
     training_cfg = TrainingConfig(batch_size=16, lr=1e-3, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
     model = GPT2(model_cfg)
 

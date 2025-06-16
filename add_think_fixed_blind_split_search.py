@@ -21,7 +21,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     d_vocab_total = think_model.cfg.d_vocab_in
     end_thought = think_model.cfg.d_vocab_in - 1
 
-    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_split_search{input_max}", config=cfg.to_dict())
+    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_split_search{input_max}", config=cfg.to_dict())
     #wandb.config.update(answer_model.cfg.to_dict())
     #wandb.config.update(think_model.cfg.to_dict())
     #wandb.config.update(cfg.to_dict())
@@ -33,13 +33,13 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     group_indices = t.arange(group_size, requires_grad=False).unsqueeze(-1)
     think_indices = t.arange(q_len, q_len + cfg.think_len, requires_grad=False)
 
-    answer_train_stop = 1e12
+    answer_train_stop = 16
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
 
         row = dataset.iloc[b]
         q_toks = t.tensor(row["question_toks"])
-        ans_tok = t.tensor(row["answer_tok"]) # Single token, not tensor
+        ans_tok = row["answer_tok"]  # Single token, not tensor
 
         ans_digits = [int(c) for c in str(ans_tok.item())] # manually creating the 'correct' chain of thought tokens
         while len(ans_digits) < ndig: ans_digits.insert(0, 0)
@@ -56,20 +56,17 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             #pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             #normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
             normed_pred_rewards = pred_rewards.softmax(dim=0)
-
-            pred_rewards = ((rollouts[:, q_len:q_len + cfg.think_len] - d_normal_vocab) == correct_thoughts[:cfg.think_len]).all(dim=-1).float()
-            normed_pred_rewards = pred_rewards
+            pred_reward_mean = normed_pred_rewards.mean().item()
             
+        
         rollouts = rollouts.clone() # sampled rollouts but with gradients on
+        rollouts_no_question = rollouts_no_question.clone()
         normed_pred_rewards = normed_pred_rewards.clone()
 
         if b < answer_train_stop:
-            #pred_logits = answer_model(correct_thoughts).squeeze()
-            print(lime, ans_tok.unsqueeze(0).repeat(group_size, 1), endc)
-            pred_logits = answer_model(ans_tok.unsqueeze(0).repeat(group_size, 1)).squeeze()
-            pred_logprobs = t.log_softmax(pred_logits[-1], dim=-1) # real token logprob distn on the end_thought token
-            pred_reward = pred_logprobs[ans_tok] # logprob value on the correct answer token
-            pred_reward_mean = pred_reward
+            pred_logits = answer_model(rollouts_no_question).squeeze()
+            pred_logprobs = t.log_softmax(pred_logits[:, -1], dim=-1) # real token logprob distn on the end_thought token
+            pred_reward = pred_logprobs[:, ans_tok].sum() # logprob value on the correct answer token
             pred_reward.backward()
 
         think_logits = think_model(rollouts).squeeze()
@@ -118,21 +115,21 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f}){endc}")
             _, benchmark_accuracy = benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, cfg.think_len)
             wandb.log({"benchmark_accuracy": benchmark_accuracy})
-            t.save(answer_model.state_dict(), f"saves/add_think_fixed_blind_super_split_search_answer{b}.pth")
-            t.save(think_model.state_dict(), f"saves/add_think_fixed_blind_super_split_search_think{b}.pth")
+            t.save(answer_model.state_dict(), f"saves/add_think_fixed_blind_split_search_answer{b}.pth")
+            t.save(think_model.state_dict(), f"saves/add_think_fixed_blind_split_search_think{b}.pth")
 
 
-INPUT_MAX = 1_000
+INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
 
 if __name__ == "__main__":
-    t.set_default_device(t.device("cpu"))
+    t.set_default_device(t.device("cuda"))
 
     d_thought_vocab = 11
-    answer_model_cfg = SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=6, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX, d_thought_vocab=d_thought_vocab)
+    answer_model_cfg = SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX, d_thought_vocab=d_thought_vocab)
     think_model_cfg =  SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
     training_cfg = TrainingConfig(
-        think_len=3,
+        think_len=2,
         think_lr=3e-4,
         answer_lr=1e-3,
         entropy_reward_weight=0.01,
@@ -145,7 +142,7 @@ if __name__ == "__main__":
     think_model = GPT2SplitModel(think_model_cfg)
 
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
-    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.9995)
+    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.995)
 
     train(answer_model, think_model, training_cfg, trainset)
     benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, training_cfg.think_len)
