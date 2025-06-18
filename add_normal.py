@@ -53,7 +53,7 @@ def benchmark_addition(model: GPT2, dataset: pd.DataFrame, max_answer_len: int =
 
 def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
-    scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
+    #scheduler = t.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=len(dataset)//cfg.batch_size)
 
     input_max = dataset.attrs["input_max"]
     batch_indices = t.arange(cfg.batch_size, requires_grad=False)
@@ -67,15 +67,15 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
         q_toks = t.tensor(np.stack(dataset.iloc[b:b+cfg.batch_size]['question_toks']))
         ans_toks = t.tensor(dataset.iloc[b:b+cfg.batch_size]['answer_tok'].to_numpy())
 
-        #logits = model.forward(q_toks).squeeze()
-        logits = model.forward(ans_toks.unsqueeze(-1))
+        logits = model.forward(q_toks).squeeze()
+        #logits = model.forward(ans_toks.unsqueeze(-1)) ################# given the answer token, predict the answer token.
         logprobs = t.log_softmax(logits, dim=-1)
 
         pred_logprobs = logprobs[batch_indices, -1, ans_toks]
         loss = -pred_logprobs.mean()
         loss.backward()
         opt.step()
-        scheduler.step()
+        #scheduler.step()
         opt.zero_grad()
 
         if b != 0 and b % 10_000 == 0:
@@ -83,14 +83,28 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame):
             tr.set_description(f"{magenta}loss: {loss.detach().item():.3f}")
             t.save(model.state_dict(), f"saves/add_normal{b}.pth")
 
-INPUT_MAX = 1_000
+INPUT_MAX = 1000
 NUM_EXAMPLES = 10_000_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
     
-    model_cfg = ModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=12, d_vocab=INPUT_MAX)
-    training_cfg = TrainingConfig(batch_size=16, lr=1e-3, weight_decay=1e-3, adam_beta1=0.9, adam_beta2=0.95)
+    model_cfg = ModelConfig(
+        d_model=512,
+        seq_len=3,
+        d_mlp=1024,
+        d_head=64,
+        n_heads=8,
+        n_layers=12,
+        d_vocab=INPUT_MAX
+    )
+    training_cfg = TrainingConfig(
+        batch_size=16,
+        lr=3e-4,
+        weight_decay=1e-3,
+        adam_beta1=0.9,
+        adam_beta2=0.95
+    )
     model = GPT2(model_cfg)
 
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)

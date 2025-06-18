@@ -1,10 +1,11 @@
 - split working. Works about as well as the other methods
 - None of them work without supervised chains of thought
 - None of them work for int max of 1000
+    - not even add_normal when its given the answer!!
 - AEs work beucase gradients flow from the output, decoder, latent representation, encoder, and inputs.
     - All the approaches here don't have that property becuase tokenization severs the gradients.
     - Maybe this suggests we should focus on non-tokenized, continuous thoughts? cuz differentiable?
-        - Do the gradients flow the whole way?
+        - Does this not matter? Am I already basically doing this through REINFORCE reparameterization trick?
     - And just to check, a single normal model which has an attn mask to the question tokens wouldn't work, right?
         - this does not capture the 
 
@@ -32,9 +33,27 @@
         - Hard. Both models seem to converge to a uniform distribution.
         - Tried freezing the answer model to capture some noise/structure for the thinking model to pick up on, but nothing.
         - A rephrasing of the difficulty here: we need these models to invent a language to talk to each other with.
-            - At first each model knows nothing. Ignoring noise, they basicalyl have no association between inputs and outputs.
+            - At first each model knows nothing. Ignoring noise, they basically have no association between inputs and outputs.
             - If one model is speaking language, the other can learn it easily. So how to get them to invent a language the other can learn?
             - The reason an autoencoder can do  this is beucase gradients flow from output, through the decoder to intermediate result, through the encoder to the inputs.
+        
+- looking at addition capacity for a normal model:
+    - There are 4 factors in this equation it seems:
+        - input-max, d_model, n_layers, and embed/unembed tying
+        - 2, 32, untied, 100  = 0.0
+        - 2, 32, untied, 1000 = 6.9
+        - 2, 32, tied,   100  = 0.0
+        - 2, 32, tied,   1000 = 6.9
+        - 2, 64, untied, 1000 = 6.9
+        - 2, 64, tied,   1000 = 6.9
+        
+        - we can also try it while just giving it  the answer and telling it to repeat it.
+        - 2, 32, untied, 1000, given answer = 2
+        - 2, 32, tied,   1000, given answer = 0
+        - 0, 64, tied or untied, 1000, given answer = 0
+        - this suggests that the model can't even hold the 1k values properly in a 32-dim residual stream. d_model too small to ever learn to add.
+    - I've tried quite large models, and I can't get them to learn 1k addition at all. how big a problem is this/do i need to change course for my proof of concept?
+
 
 - This training method has several compounding levels of training difficulty
     - boostrapping problem. We have to learn to produce useful thinking tokens and learn to use thinking tokens simultaneously.

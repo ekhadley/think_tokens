@@ -24,10 +24,11 @@ def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, thi
         with t.no_grad():
             for i in range(think_len):
                 logits = think_model(rollout).squeeze()
-                think_tok = logits[-1, :-1].argmax() + d_normal_vocab
+                think_tok = logits[-1].argmax() + d_normal_vocab
                 rollout = t.cat([rollout, think_tok.unsqueeze(0)])
             
-            rollout_no_question = t.cat([rollout[q_len:] - d_normal_vocab, t.tensor([think_model.cfg.d_thought_vocab - 1])], dim=0) # add end_thought token
+            #rollout_no_question = t.cat([rollout[q_len:] - d_normal_vocab, t.tensor([think_model.cfg.d_thought_vocab - 1])], dim=0) # add end_thought token
+            rollout_no_question = rollout[q_len:] - d_normal_vocab
             logits = answer_model(rollout_no_question).squeeze()
             logprobs = t.log_softmax(logits[-1], dim=-1)
             ans_logprob = logprobs[ans_tok]
@@ -67,7 +68,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
 
     group_indices = t.arange(cfg.group_size, requires_grad=False).unsqueeze(-1)
     think_indices = t.arange(q_len, q_len + cfg.think_len, requires_grad=False)
-    end_thoughts = t.tensor([end_thought] * cfg.group_size, requires_grad=False).unsqueeze(-1) # end_thought token for each group
+    #end_thoughts = t.tensor([end_thought] * cfg.group_size, requires_grad=False).unsqueeze(-1) # end_thought token for each group
 
     answer_train_stop = 1e9
 
@@ -88,12 +89,13 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                     think_toks = t.randint(d_normal_vocab, d_vocab_total - 1, (cfg.group_size, 1))
                 else:
                     logits = think_model(rollouts).squeeze()
-                    sample_probs = t.softmax((logits[:, -1, :-1]), dim=-1) # get logpprob distn over thinking token
+                    sample_probs = t.softmax((logits[:, -1]), dim=-1) # get logpprob distn over thinking token
                     think_toks = t.multinomial(sample_probs, num_samples=1) + d_normal_vocab # sample a thinking token. thinking model input expects thinking tokens in the range [d_normal_vocab, d_normal_vocab + d_thought_vocab)
 
                 rollouts = t.cat([rollouts, think_toks], dim=1)
             
-            rollouts_no_question = t.cat([rollouts[:, q_len:] - d_normal_vocab, end_thoughts], dim=-1) # add end_thought token and shift token ids
+            #rollouts_no_question = t.cat([rollouts[:, q_len:] - d_normal_vocab, end_thoughts], dim=-1) # add end_thought token and shift token ids
+            rollouts_no_question = rollouts[:, q_len:] - d_normal_vocab
             logits = answer_model(rollouts_no_question).squeeze()
             logprobs = t.log_softmax(logits[:, -1], dim=-1)
             pred_rewards = logprobs[:, ans_tok]  # ans_tok is the single token ID
@@ -115,7 +117,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             pred_reward.backward()
 
         think_logits = think_model(rollouts).squeeze()
-        think_logprobs = t.log_softmax(think_logits[group_indices, (think_indices - 1).unsqueeze(0), :-1], dim=-1) # logprob distns for each thinking token position
+        think_logprobs = t.log_softmax(think_logits[group_indices, (think_indices - 1).unsqueeze(0)], dim=-1) # logprob distns for each thinking token position
         action_logprobs = think_logprobs[group_indices, think_indices - q_len, rollouts[:, think_indices] - d_normal_vocab] # logprob of the thinking tokens that were outputted
         weighted_action_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1) # logprobs times rewards
         think_reward = weighted_action_logprobs.sum() # sum of the think rewards
@@ -175,7 +177,7 @@ NUM_EXAMPLES = 1_000_000
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
 
-    d_thought_vocab = 11
+    d_thought_vocab = 10
     answer_model_cfg = SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX, d_thought_vocab=d_thought_vocab)
     think_model_cfg =  SplitModelConfig(d_model=32, seq_len=32, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
     training_cfg = TrainingConfig(

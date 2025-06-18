@@ -124,7 +124,8 @@ class GPT2(nn.Module):
         for i, block in enumerate(self.blocks):
             x = block(x)
         x = self.ln_f(x)
-        x = self.unembed(x)
+        x = self.unembed(x) # untied
+        #x = F.linear(x, self.embed.weight) # tied
         return x
     def yap(self, prompt: str, max_length: int = 50):
         with t.no_grad():
