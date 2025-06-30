@@ -1,4 +1,5 @@
 import random
+from tqdm import trange
 import torch as t
 from torch import nn
 from torch.nn import functional as F
@@ -55,68 +56,51 @@ class SimpleTokenizer:
 
 
 def makeAdditionDataset(tokenizer, int_max, n_questions, train_split: float = 1.0):
-    question_str = []
-    answer_str = []
-    question_toks = []
-    answer_tok = []  # Single token, not a list
-
-    # Calculate all possible unique questions
-    all_questions = [f"{n1} {n2}" for n1 in range(int_max) for n2 in range(int_max)]
-    random.shuffle(all_questions)
-    n_unique = len(all_questions)
+    print()
+    #unique_questions = [(n1, n2) for n1 in range(int_max) for n2 in range(int_max)]
+    unique_questions = [[n1, n2] for n1 in range(int_max) for n2 in range(int_max)]
+    random.shuffle(unique_questions)
+    n_unique = len(unique_questions)
     if n_questions > n_unique:
         print("Warning: dataset will contain duplicates. Test set will remain unique.")
 
-    # Determine split sizes
     if train_split < 1.0:
-        n_test = int(n_questions * (1 - train_split))
-        n_train = n_questions - n_test
+        n_test = int(n_questions * (1 - train_split)) # the number of examples that should be in the full test set
+        n_train = n_questions - n_test # the number of examples that should be in the full training set
     else:
         n_test = 0
         n_train = n_questions
 
     # Assign test set from unique pool
-    test_questions = all_questions[:n_test]
-    train_questions = all_questions[n_test:n_unique]
-    # If more training examples are needed, sample with replacement from all unique questions
+    n_unique_test = int(n_unique * (1 - train_split)) if n_test > 0 else 0
+    test_questions = unique_questions[:n_unique_test] # grab all our uniqiue examples for each set
+    train_questions = unique_questions[n_unique_test:]
     if n_train > len(train_questions):
         extra_needed = n_train - len(train_questions)
-        train_questions += random.choices(all_questions, k=extra_needed)
-    else:
-        train_questions = train_questions[:n_train]
+        train_questions += random.choices(train_questions, k=extra_needed)
+    if n_test > len(test_questions):
+        extra_needed = n_test - len(test_questions)
+        test_questions += random.choices(test_questions, k=extra_needed)
 
-    def add_examples(questions):
-        for question in questions:
-            n1, n2 = map(int, question.split())
-            answer = str((n1 + n2)%int_max)
-            #answer = str(n1 + n2)
-            toks = np.array(tokenizer.encode(question))
-            ans_tok = tokenizer.encode(answer)[0]
-            question_str.append(question)
-            answer_str.append(answer)
-            question_toks.append(toks)
-            answer_tok.append(ans_tok)
-
-    # Add training and test examples
-    add_examples(train_questions)
+    question_arr = np.array(train_questions)
+    answer_toks = question_arr.sum(axis=-1) % int_max
+    question_toks = np.unstack(question_arr, axis=0)
     train_dataset = pd.DataFrame({
-        "question": question_str,
-        "answer": answer_str,
         "question_toks": question_toks,
-        "answer_tok": answer_tok,
+        "answer_tok": answer_toks,
     })
     train_dataset.attrs['n_examples'] = n_questions
     train_dataset.attrs['input_max'] = int_max
-    train_dataset.attrs['question_len'] = len(question_toks[0]) if train_questions else 0
+    train_dataset.attrs['question_len'] = len(question_toks) if train_questions else 0
     if n_test > 0:
         # Clear lists and add test examples
-        question_str.clear(); answer_str.clear(); question_toks.clear(); answer_tok.clear()
-        add_examples(test_questions)
+        #question_toks.clear(); answer_tok.clear()
+        test_question_arr = np.array(test_questions)
+        test_answer_toks = test_question_arr.sum(axis=-1) % int_max
+        test_question_toks = np.unstack(test_question_arr, axis=0)
         test_dataset = pd.DataFrame({
-            "question": question_str,
-            "answer": answer_str,
-            "question_toks": question_toks,
-            "answer_tok": answer_tok,
+            "question_toks": test_question_toks,
+            "answer_tok": test_answer_toks,
         })
         test_dataset.attrs['n_examples'] = n_questions
         test_dataset.attrs['input_max'] = int_max

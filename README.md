@@ -1,7 +1,5 @@
 - split working. Works about as well as the other methods
 - None of them work without supervised chains of thought
-- None of them work for int max of 1000
-    - not even add_normal when its given the answer!!
 - AEs work beucase gradients flow from the output, decoder, latent representation, encoder, and inputs.
     - All the approaches here don't have that property becuase tokenization severs the gradients.
     - Maybe this suggests we should focus on non-tokenized, continuous thoughts? cuz differentiable?
@@ -25,9 +23,11 @@
         - my inclination is to figure out how to do rewards properly. So that would be getting rid of 'clean'
 
     - same combo does not work for 1000. The prediction policy can't even learn with supervised thinking sequences? bug?
+        - Not bug, just had bad hyperparams apparently. need large batch sizes >= 64 and weight decay is evil.
 
     - removing clean also technically works beucase you can just softmax to recover the clean reward signal.
         - But this basically only works when the answering model knows whats going on, and probably only works in domains where perfect answers exist (so modular addition, but not general text prediction)
+            - Although final answer logits in normal LMs are quite sparse/spiky. So not a single correct answer like arithmetic tasks, but close to one hot. few-hot. Could still be applicable on normal language.
 
     - Attempts to remove 'super':
         - Hard. Both models seem to converge to a uniform distribution.
@@ -36,24 +36,6 @@
             - At first each model knows nothing. Ignoring noise, they basically have no association between inputs and outputs.
             - If one model is speaking language, the other can learn it easily. So how to get them to invent a language the other can learn?
             - The reason an autoencoder can do  this is beucase gradients flow from output, through the decoder to intermediate result, through the encoder to the inputs.
-        
-- looking at addition capacity for a normal model:
-    - There are 4 factors in this equation it seems:
-        - input-max, d_model, n_layers, and embed/unembed tying
-        - 2, 32, untied, 100  = 0.0
-        - 2, 32, untied, 1000 = 6.9
-        - 2, 32, tied,   100  = 0.0
-        - 2, 32, tied,   1000 = 6.9
-        - 2, 64, untied, 1000 = 6.9
-        - 2, 64, tied,   1000 = 6.9
-        
-        - we can also try it while just giving it  the answer and telling it to repeat it.
-        - 2, 32, untied, 1000, given answer = 2
-        - 2, 32, tied,   1000, given answer = 0
-        - 0, 64, tied or untied, 1000, given answer = 0
-        - this suggests that the model can't even hold the 1k values properly in a 32-dim residual stream. d_model too small to ever learn to add.
-    - I've tried quite large models, and I can't get them to learn 1k addition at all. how big a problem is this/do i need to change course for my proof of concept?
-
 
 - This training method has several compounding levels of training difficulty
     - boostrapping problem. We have to learn to produce useful thinking tokens and learn to use thinking tokens simultaneously.
