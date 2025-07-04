@@ -138,7 +138,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
 
 
 if __name__ == "__main__":
-    t.set_default_device(t.device("cpu"))
+    t.set_default_device(t.device("cuda"))
 
     d_vocab = 50_257
     d_thought_vocab = 2048
