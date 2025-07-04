@@ -8,7 +8,7 @@ import torch as t
 from models import GPT2SplitModel, TrainingConfig, SplitModelConfig
 from utils import *
 
-def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int):
+def __benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int):
     answer_model.eval()
     think_model.eval()
     total_logprob = 0.0
@@ -42,6 +42,73 @@ def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, thi
     accuracy = correct / len(dataset)
     print(yellow, f"[ThinkFixed] Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}", endc)
     return mean_logprob, accuracy
+
+def _benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int, cat_end_thought: bool = False, display: bool = False):
+    answer_model.eval()
+    think_model.eval()
+    total_logprob = 0.0
+    total_tokens = 0
+    correct = 0
+    q_len = dataset.attrs["question_len"]
+    d_normal_vocab = dataset.attrs["input_max"]
+    end_thought_token = think_model.cfg.d_thought_vocab - 1
+    dataset_iter = enumerate(dataset.itertuples())
+    if display: dataset_iter = tqdm.tqdm(dataset_iter, total=len(dataset), desc="BenchmarkThinkFixedBlindSplit", ncols=100)
+    for i, row in dataset_iter:
+        q_toks = t.tensor(row.question_toks)
+        ans_tok = row.answer_tok
+
+        rollout = q_toks.clone()
+        with t.no_grad():
+            for i in range(think_len):
+                think_logits = think_model(rollout).squeeze()
+                think_tok = think_logits[-1].argmax() + d_normal_vocab
+                rollout = t.cat([rollout, think_tok.unsqueeze(0)])
+            #rollout_no_question = t.cat([rollout[q_len:] - d_normal_vocab, t.tensor([think_model.cfg.d_thought_vocab - 1])], dim=0) # add end_thought token
+            rollout_no_question = rollout[q_len:] - d_normal_vocab
+            if cat_end_thought: rollout_no_question = t.cat([rollout_no_question, t.tensor([end_thought_token])], dim=0)
+            ans_logits = answer_model(rollout_no_question).squeeze()
+            logprobs = t.log_softmax(ans_logits[-1], dim=-1)
+            ans_logprob = logprobs[ans_tok]
+            total_logprob += ans_logprob.item()
+            total_tokens += 1
+            generated = logprobs.argmax().item()
+
+            if generated == ans_tok:
+                correct += 1
+    
+    mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
+    accuracy = correct / len(dataset)
+    return mean_logprob, accuracy
+
+def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int, cat_end_thought: bool = False, display: bool = False):
+    answer_model.eval()
+    think_model.eval()
+    q_len = dataset.attrs["question_len"]
+    d_normal_vocab = dataset.attrs["input_max"]
+    n_examples = dataset.attrs["n_examples"]
+    end_thought_token = think_model.cfg.d_thought_vocab - 1
+
+    with t.no_grad():
+        q_toks = t.tensor(np.stack(dataset['question_toks']))
+        ans_toks = t.tensor(dataset['answer_tok'].to_numpy())
+        if cat_end_thought: end_thoughts = t.tensor([end_thought_token] * len(dataset), dtype=t.int64)
+
+        rollouts = q_toks.clone()
+        for i in range(think_len):
+            think_logits = think_model(rollouts).squeeze()
+            think_toks = think_logits[:, -1].argmax(dim=-1) + d_normal_vocab
+            rollouts = t.cat([rollouts, think_toks.unsqueeze(-1)], dim=1)
+        rollout_no_question = rollouts[:, q_len:] - d_normal_vocab
+        if cat_end_thought: rollout_no_question = t.cat([rollout_no_question, end_thoughts], dim=0)
+        ans_logits = answer_model(rollout_no_question).squeeze()
+        logprobs = t.log_softmax(ans_logits[:, -1], dim=-1)
+        ans_logprobs = logprobs[t.arange(n_examples), ans_toks]
+        ans_guesses = logprobs.argmax(dim=-1)
+        mean_logprob = ans_logprobs.mean().item()
+        accuracy = (ans_guesses == ans_toks).float().mean().item()
+    return mean_logprob, accuracy
+
 
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, dataset: pd.DataFrame):
     answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
@@ -195,7 +262,7 @@ if __name__ == "__main__":
     think_model = GPT2SplitModel(think_model_cfg)
 
     simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
-    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.995)
+    trainset, testset = makeAdditionDataset(INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
 
     train(answer_model, think_model, training_cfg, trainset)
     benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, training_cfg.think_len)

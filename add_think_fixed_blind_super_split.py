@@ -6,51 +6,14 @@ import pandas as pd
 import torch as t
 
 from models import GPT2SplitModel, TrainingConfig, SplitModelConfig
+from add_think_fixed_blind_split import benchmark_addition_think_fixed_blind_split
 from utils import *
-
-def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int):
-    answer_model.eval()
-    think_model.eval()
-    total_logprob = 0.0
-    total_tokens = 0
-    correct = 0
-    q_len = dataset.attrs["question_len"]
-    d_normal_vocab = dataset.attrs["input_max"]
-    for i, row in tqdm.tqdm(enumerate(dataset.itertuples()), total=len(dataset), desc="BenchmarkThinkFixed", ncols=100):
-        q_toks = t.tensor(row.question_toks)
-        ans_tok = row.answer_tok
-
-        rollout = q_toks.clone()
-        with t.no_grad():
-            for i in range(think_len):
-                logits = think_model(rollout).squeeze()
-                think_tok = logits[-1].argmax() + d_normal_vocab
-                rollout = t.cat([rollout, think_tok.unsqueeze(0)])
-            
-            #rollout_no_question = t.cat([rollout[q_len:] - d_normal_vocab, t.tensor([think_model.cfg.d_thought_vocab - 1])], dim=0) # add end_thought token
-            rollout_no_question = rollout[q_len:] - d_normal_vocab
-            logits = answer_model(rollout_no_question).squeeze()
-            logprobs = t.log_softmax(logits[-1], dim=-1)
-            ans_logprob = logprobs[ans_tok]
-            total_logprob += ans_logprob.item()
-            total_tokens += 1
-            generated = logprobs.argmax().item()
-
-            if generated == ans_tok:
-                correct += 1
-
-    mean_logprob = total_logprob / total_tokens if total_tokens > 0 else float('nan')
-    accuracy = correct / len(dataset)
-    print(yellow, f"[ThinkFixed] Mean logprob: {mean_logprob:.4f}, Accuracy: {accuracy:.4f}", endc)
-    return mean_logprob, accuracy
 
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, dataset: pd.DataFrame):
     answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
-    #answer_scheduler = t.optim.lr_scheduler.CosineAnnealingLR(answer_opt, T_max=len(dataset)//cfg.batch_size)
-    answer_scheduler = t.optim.lr_scheduler.CosineAnnealingLR(answer_opt, T_max=2000)
-    
     think_opt = t.optim.AdamW(think_model.parameters(), lr=cfg.think_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
-    think_scheduler = t.optim.lr_scheduler.CosineAnnealingLR(think_opt, T_max=len(dataset)//cfg.batch_size)
+    answer_model.train()
+    think_model.train()
 
     input_max = dataset.attrs["input_max"]
     ndig = int(math.log10(input_max))
@@ -71,6 +34,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     #end_thoughts = t.tensor([end_thought] * cfg.group_size, requires_grad=False).unsqueeze(-1) # end_thought token for each group
 
     answer_train_stop = 1e9
+    benchmark_accuracy = 0.0
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=200)):
         row = dataset.iloc[b]
@@ -130,11 +94,9 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         if b != 0 and b % cfg.batch_size == 0:
             if b < answer_train_stop:
                 answer_opt.step()
-                answer_scheduler.step()
                 answer_opt.zero_grad()
 
             think_opt.step()
-            think_scheduler.step()
             think_opt.zero_grad()
 
             pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
