@@ -116,8 +116,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             #t.save(answer_model.state_dict(), f"saves/add_think_fixed_blind_super_split_search_answer{b}.pth")
             #t.save(think_model.state_dict(), f"saves/add_think_fixed_blind_super_split_search_think{b}.pth")
 
-INPUT_MAX = 500
-NUM_EXAMPLES = 50_000_000
+INPUT_MAX = 1_000
+NUM_EXAMPLES = 100_000_000
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))

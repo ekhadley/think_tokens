@@ -54,7 +54,7 @@
         - Multiple modular additions in a single problem?
         - simple sat problems?
         - list sorting?
-        - maybe no more toy problems and just do language?
+        - maybe no more toy problems and just do the thing?
 
 - splitting the answering policy and the thinking policy into two models is kind of like a variational autoencoder.
     - read about autoencoders.
@@ -64,7 +64,7 @@
     - Maybe this suggests we should focus on non-tokenized, continuous thoughts? cuz differentiable?
         - Does this not matter? Am I already basically doing this through REINFORCE reparameterization trick?
     - And just to check, a single normal model which has an attn mask to the question tokens wouldn't work, right?
-        - this does not capture the 
+        - ?
 
 - addition task:
     - add_normal works.

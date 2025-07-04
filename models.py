@@ -200,6 +200,8 @@ class GPT2SplitModel(nn.Module):
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_out, bias=False)
 
+        self.eot = cfg.d_vocab_in - 1
+
     def forward(self, x: t.Tensor) -> t.Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
         x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
