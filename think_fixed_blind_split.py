@@ -93,7 +93,6 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
         chunked_rewards = normed_pred_rewards.chunk(group_size, dim=0)
         chunked_rollouts = rollouts.chunk(group_size, dim=0)
         for seq_chunk, rew_chunk, roll_chunk in zip(chunked_seqs, chunked_rewards, chunked_rollouts):
-            print(red, seq_chunk.shape, rew_chunk.shape, endc)
             think_logits = think_model(seq_chunk).squeeze()
             think_logprobs = t.log_softmax(think_logits[batch_indices, -cfg.think_len - 1:-1], dim=-1) # logprob distns for the positions where thinking tokens were emitted
             action_logprobs = think_logprobs[batch_indices.unsqueeze(-1), t.tensor(range(cfg.think_len)).unsqueeze(0), roll_chunk] # logprob of the thinking tokens that were outputted
