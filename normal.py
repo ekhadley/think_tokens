@@ -18,7 +18,8 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
 
     sample_completion = model.yap("George Washington was")
     print(yellow, sample_completion, endc)
-    table = wandb.Table(data=[[sample_completion]], columns=['completion'])
+    table_data = [sample_completion]
+    table = wandb.Table(data=table_data, columns=['completion'])
     wandb.log({"sample_completion": table})
 
     dl = t.utils.data.DataLoader(dataset, batch_size=cfg.batch_size)
@@ -34,10 +35,11 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
         wandb.log({"loss": loss.item()})
         tr.set_description(f"{magenta}loss: {loss.item():.3f}")
 
-        if i%1000 == 0:
+        if i%1_000 == 0:
             sample_completion = model.yap("George Washington was")
             print(yellow, sample_completion, endc)
-            table = wandb.Table(data=[[sample_completion]], columns=['completion'])
+            table_data.append(sample_completion)
+            table = wandb.Table(data=table_data, columns=['completion'])
             wandb.log({"sample_completion": table})
 
             t.save(model.state_dict(), f"saves/normal{i}.pth")
@@ -49,7 +51,7 @@ if __name__ == "__main__":
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=3e-4,
+        lr=1e-3,
         weight_decay=1e-6,
         adam_beta1=0.9,
         adam_beta2=0.95

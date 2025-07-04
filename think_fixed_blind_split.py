@@ -29,7 +29,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
     #wandb.log({"sample_completion": table})
     group_size = cfg.group_size
     full_batch_size = group_size * cfg.batch_size
-    max_seq_len = answer_model.cfg.seq_len - 1 - cfg.think_len
+    max_seq_len = think_model.cfg.seq_len - 1 - cfg.think_len
 
     pred_acc = 0.0
 
@@ -153,15 +153,15 @@ if __name__ == "__main__":
     tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     training_cfg = TrainingConfig(
-        think_lr=1e-3,
-        answer_lr=1e-3,
-        weight_decay=1e-3,
+        think_lr=3e-4,
+        answer_lr=3e-4,
+        weight_decay=1e-6,
         entropy_reward_weight=0.0,
         think_len=think_len,
-        group_size=2,
+        group_size=32,
+        batch_size=64,
         eps_decay=0.999998,
         eps_min=0.01,
-        batch_size=4,
         adam_beta1=0.9,
         adam_beta2=0.95
     )
