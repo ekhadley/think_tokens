@@ -18,7 +18,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
 
     sample_completion = model.yap("George Washington was")
     print(yellow, sample_completion, endc)
-    table_data = [sample_completion]
+    table_data = [[sample_completion]]
     table = wandb.Table(data=table_data, columns=['completion'])
     wandb.log({"sample_completion": table})
 
@@ -38,7 +38,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
         if i%1_000 == 0:
             sample_completion = model.yap("George Washington was")
             print(yellow, sample_completion, endc)
-            table_data.append(sample_completion)
+            table_data.append([sample_completion])
             table = wandb.Table(data=table_data, columns=['completion'])
             wandb.log({"sample_completion": table})
 
