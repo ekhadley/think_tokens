@@ -105,11 +105,9 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
         answer_opt.zero_grad()
         think_opt.zero_grad()
 
-
         with t.inference_mode():
             pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
             pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging
-
 
             think_logits = think_model(seqs).squeeze()
             think_logprobs = t.log_softmax(think_logits[full_batch_indices, -cfg.think_len - 1:-1], dim=-1) # logprob distns for the positions where thinking tokens were emitted

@@ -1,4 +1,5 @@
 import random
+import itertools
 from tqdm import trange
 import torch as t
 from torch import nn
@@ -54,8 +55,76 @@ class SimpleTokenizer:
     def decode(self, ids):
         return ''.join([self.id_to_token[i] for i in ids])
 
+def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
+    logits = logits.squeeze() / temperature
+    if top_k > 0:
+        indices_to_remove = logits < t.topk(logits, top_k)[0][..., -1, None]
+        logits[indices_to_remove] = -float('Inf')
+    if 0 < top_p < 1:
+        sorted_logits, sorted_indices = t.sort(logits, descending=True)
+        cumulative_probs = t.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+        sorted_indices_to_remove = cumulative_probs
 
-def makeAdditionDataset(int_max, n_train, train_split: float = 1.0):
+def sampleLogprobs(logprobs: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
+    logprobs = logprobs.squeeze() / temperature
+    if top_k > 0:
+        indices_to_remove = logprobs < t.topk(logprobs, top_k)[0][..., -1, None]
+        logprobs[indices_to_remove] = -float('Inf')
+    if 0 < top_p < 1:
+        sorted_logits, sorted_indices = t.sort(logprobs, descending=True)
+        cumulative_probs = t.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+        sorted_indices_to_remove = cumulative_probs > top_p
+        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+        sorted_indices_to_remove[..., 0] = 0
+        indices_to_remove = sorted_indices[sorted_indices_to_remove]
+        logprobs[indices_to_remove] = -float('Inf')
+    probs = F.softmax(logprobs, dim=-1)
+    return t.multinomial(probs, num_samples=1)
+
+def makeMultiAdditionDataset(int_max: int, num_adds: int, n_train: int, train_split: float = 1.0):
+    #unique_questions = [[n1, n2] for n1 in range(int_max) for n2 in range(int_max)]
+    unique_questions = list(itertools.product(range(int_max), repeat=num_adds))
+    random.shuffle(unique_questions)
+    n_unique = len(unique_questions)
+
+    n_unique_train = min(int(n_unique * train_split) if train_split < 1 else n_unique, n_train)
+    n_test = min(n_unique - n_unique_train, int(n_train * (1 - train_split)))
+    assert n_unique_train > 0, f"For int_max={int_max}, train split must be 0 or > {1/n_unique}"
+    print(gray, f"Dataset has {n_unique:,} unique questions. {n_unique_train:,} in train and {n_test:,} in test.", endc)
+    test_questions = unique_questions[n_unique_train:] # grab all our uniqiue examples for each set
+    train_questions = unique_questions[:n_unique_train]
+    if n_unique_train < n_train:
+        extra_needed = n_train - n_unique_train
+        train_questions += random.choices(train_questions, k=extra_needed)
+
+    question_arr = np.array(train_questions)
+    answer_toks = question_arr.sum(axis=-1) % int_max
+    question_toks = np.unstack(question_arr, axis=0)
+    train_dataset = pd.DataFrame({
+        "question_toks": question_toks,
+        "answer_tok": answer_toks,
+    })
+    train_dataset.attrs['n_examples'] = n_train
+    train_dataset.attrs['input_max'] = int_max
+    train_dataset.attrs['num_adds'] = num_adds
+    train_dataset.attrs['question_len'] = len(question_toks[0]) if train_questions else 0
+    if n_test > 0:
+        test_question_arr = np.array(test_questions)
+        test_answer_toks = test_question_arr.sum(axis=-1) % int_max
+        test_question_toks = np.unstack(test_question_arr, axis=0)
+        test_dataset = pd.DataFrame({
+            "question_toks": test_question_toks,
+            "answer_tok": test_answer_toks,
+        })
+        test_dataset.attrs['n_examples'] = n_test
+        test_dataset.attrs['input_max'] = int_max
+        test_dataset.attrs['num_adds'] = num_adds
+        test_dataset.attrs['question_len'] = len(question_toks[0]) if test_questions else 0
+        return train_dataset, test_dataset
+    else:
+        return train_dataset
+
+def makeAdditionDataset(int_max: int, n_train: int, train_split: float = 1.0):
     unique_questions = [[n1, n2] for n1 in range(int_max) for n2 in range(int_max)]
     random.shuffle(unique_questions)
     n_unique = len(unique_questions)
