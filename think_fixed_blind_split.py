@@ -14,7 +14,7 @@ class TokenIndexIter: # let's us randomly iterate over tokens (a random position
         self.n_sequences = n_sequences
         self.seq_len = seq_len
 
-def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: GPT2TokenizerFast, cfg: TrainingConfig, dataset: datasets.Dataset):
+def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, dataset: datasets.Dataset):
     answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
     think_opt = t.optim.AdamW(think_model.parameters(), lr=cfg.think_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay, maximize=True)
     answer_model.train()
@@ -46,30 +46,26 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
     
     dl = t.utils.data.DataLoader(dataset, batch_size=cfg.batch_size)
     for b, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=140))):
-        with t.inference_mode():
+        with t.inference_mode(): # generate rollouts without gradients
             seq_len = random.randint(1, max_seq_len)
             seqs = batch['input_ids'][:, :seq_len]
-            ans_toks = batch['input_ids'][batch_indices, seq_len].reshape(-1, 1).repeat(1, group_size).flatten()
-            seqs = seqs.unsqueeze(0).repeat(1, 1, group_size).reshape(full_batch_size, -1)
-            #print()
-            #print(orange, seqs.shape, endc)
+            seqs = seqs.unsqueeze(0).repeat(1, 1, group_size).reshape(full_batch_size, -1) # repeat each seq in the batch group_size times
+            ans_toks = batch['input_ids'][batch_indices, seq_len].reshape(-1, 1).repeat(1, group_size).flatten() # correct answer token for each sequence in the batch
 
-            for i_t in range(cfg.think_len):
+            for i_t in range(cfg.think_len): # generate thinking tokens
                 think_logits = think_model(seqs)
                 think_probs = t.softmax(think_logits[:, -1], dim=-1)
-                think_toks = t.multinomial(think_probs, num_samples=1) + d_normal_vocab
+                think_toks = t.multinomial(think_probs, num_samples=1) + d_normal_vocab # samples a continuation token for each sequence (each group element in each batch element for the whole batch). This gives us natural rollout variance
                 seqs = t.cat([seqs, think_toks], dim=1)
 
             rollouts = seqs[:, -cfg.think_len:] - d_normal_vocab
-            #print(pink, seqs.shape, lime, rollouts.shape, endc)
             logits = answer_model(rollouts).squeeze()
             logprobs = t.log_softmax(logits[:, -1], dim=-1)
-            pred_rewards = logprobs[full_batch_indices, ans_toks]  # ans_tok is the single token ID
+            pred_rewards = logprobs[full_batch_indices, ans_toks]  # answer model's logprob of the correct answer token is our reward signal
             pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
             normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
-            #print(magenta, normed_pred_rewards.shape, endc)
             
-            epsilon = max(epsilon * cfg.eps_decay, cfg.eps_min)
+            #epsilon = max(epsilon * cfg.eps_decay, cfg.eps_min)
 
         seqs = seqs.clone() 
         rollouts = rollouts.clone()
@@ -92,7 +88,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
         chunked_seqs = seqs.chunk(group_size, dim=0)
         chunked_rewards = normed_pred_rewards.chunk(group_size, dim=0)
         chunked_rollouts = rollouts.chunk(group_size, dim=0)
-        for seq_chunk, rew_chunk, roll_chunk in zip(chunked_seqs, chunked_rewards, chunked_rollouts):
+        for seq_chunk, rew_chunk, roll_chunk in zip(chunked_seqs, chunked_rewards, chunked_rollouts): # chunk to save memory
             think_logits = think_model(seq_chunk).squeeze()
             think_logprobs = t.log_softmax(think_logits[batch_indices, -cfg.think_len - 1:-1], dim=-1) # logprob distns for the positions where thinking tokens were emitted
             action_logprobs = think_logprobs[batch_indices.unsqueeze(-1), t.tensor(range(cfg.think_len)).unsqueeze(0), roll_chunk] # logprob of the thinking tokens that were outputted
@@ -106,17 +102,9 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
         think_opt.zero_grad()
 
         with t.inference_mode():
-            pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
-            pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging
+            pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging. Tells us how much the rollout influences the answer model's final output
+            pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging. tells us similar thing.
 
-            think_logits = think_model(seqs).squeeze()
-            think_logprobs = t.log_softmax(think_logits[full_batch_indices, -cfg.think_len - 1:-1], dim=-1) # logprob distns for the positions where thinking tokens were emitted
-            action_logprobs = think_logprobs[full_batch_indices.unsqueeze(-1), t.tensor(range(cfg.think_len)).unsqueeze(0), rollouts] # logprob of the thinking tokens that were outputted
-            weighted_action_logprobs = action_logprobs * normed_pred_rewards.unsqueeze(-1)
-            think_reward = weighted_action_logprobs.sum()
-
-            think_loss = action_logprobs[(pred_rewards > 0)].mean()
-            
             wandb.log({
                 "pred_reward": pred_reward_mean,
                 "think_reward": think_reward,
@@ -124,10 +112,9 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, tokenizer: 
                 "pred_reward_var": pred_reward_var,
                 "pred_prob_var": pred_prob_var,
                 #"prob_force_end_thought": 0.0,
-                "epsilon": epsilon,
+                #"epsilon": epsilon,
                 #"think_logprobs": think_logprobs[0],
                 #"entropy_reward": entropy,
-                "think_loss": think_loss,
             })
             tr.set_description(f"{magenta}pred reward: {pred_reward_mean:.3f}, think reward: {think_reward:.3f}, epsilon: {epsilon:.3f}, pred acc: {pred_acc:.3f}")
 
@@ -152,7 +139,7 @@ if __name__ == "__main__":
 
     d_vocab = 50_257
     d_thought_vocab = 2048
-    think_len = 2
+    think_len = 4
     answer_model_cfg = SplitModelConfig(d_model=32, seq_len=think_len,  d_mlp=128, d_head=16, n_heads=4, n_layers=1, d_vocab_in=d_thought_vocab, d_vocab_out=d_vocab, d_thought_vocab=d_thought_vocab)
     #think_model_cfg =  SplitModelConfig(d_model=64, seq_len=128, d_mlp=128, d_head=32, n_heads=4, n_layers=2, d_vocab_in=d_vocab + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
     #answer_model_cfg = SplitModelConfig(d_model=512, seq_len=think_len, d_mlp=2048, d_head=64, n_heads=4, n_layers=2, d_vocab_in=d_thought_vocab, d_vocab_out=d_vocab, d_thought_vocab=d_thought_vocab)
@@ -160,7 +147,7 @@ if __name__ == "__main__":
 
     answer_model = GPT2SplitModel(answer_model_cfg)
     think_model = GPT2SplitModel(think_model_cfg)
-    tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
+    #tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     training_cfg = TrainingConfig(
         think_lr=3e-4,
@@ -179,4 +166,4 @@ if __name__ == "__main__":
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
     dataset = loadTokenizedDataset("fineweb-edu-tokenized-128")
 
-    train(answer_model, think_model, tokenizer, training_cfg, dataset)
+    train(answer_model, think_model, training_cfg, dataset)

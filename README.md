@@ -56,9 +56,6 @@
         - list sorting?
         - maybe no more toy problems and just do the thing?
 
-- splitting the answering policy and the thinking policy into two models is kind of like a variational autoencoder.
-    - read about autoencoders.
-
 - AEs work beucase gradients flow from the output, decoder, latent representation, encoder, and inputs.
     - All the approaches here don't have that property becuase tokenization severs the gradients.
     - Maybe this suggests we should focus on non-tokenized, continuous thoughts? cuz differentiable?
