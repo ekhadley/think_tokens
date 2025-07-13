@@ -45,7 +45,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     epsilon = 0.0
     
     dl = t.utils.data.DataLoader(dataset, batch_size=cfg.batch_size)
-    for b, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=140))):
+    for b, batch in enumerate(tr:=tqdm.tqdm(dl, ncols=140)):
         with t.inference_mode(): # generate rollouts without gradients
             seq_len = random.randint(1, max_seq_len)
             seqs = batch['input_ids'][:, :seq_len]
@@ -63,8 +63,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             logprobs = t.log_softmax(logits[:, -1], dim=-1)
             pred_rewards = logprobs[full_batch_indices, ans_toks]  # answer model's logprob of the correct answer token is our reward signal
             pred_reward_mean = pred_rewards.mean().item() # mean of the predicted rewards
-            normed_pred_rewards = (pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8) # normalize the rewards
-            
+            normed_pred_rewards = t.clamp_min((pred_rewards - pred_reward_mean) / (pred_rewards.std() + 1e-8), 0) # normalize the rewards
+
             #epsilon = max(epsilon * cfg.eps_decay, cfg.eps_min)
 
         seqs = seqs.clone() 

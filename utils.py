@@ -29,7 +29,7 @@ underline = '\033[4m'
 endc = '\033[0m'
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
-t.set_printoptions(sci_mode=False, linewidth=300)
+t.set_printoptions(sci_mode=False, linewidth=400, edgeitems=5)
 
 class SimpleTokenizer:
     def __init__(self, max_int):
@@ -179,6 +179,7 @@ def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top
         logits[indices_to_remove] = -float('Inf')
     probs = F.softmax(logits, dim=-1)
     return t.multinomial(probs, num_samples=1)
+
 def sampleLogprobs(logprobs: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
     logprobs = logprobs.squeeze() / temperature
     if top_k > 0:
@@ -214,8 +215,6 @@ def loadTokenizedDataset(name: str):
     dataset = datasets.load_from_disk(f"datasets/{name}")
     dataset.set_format(type='torch')
     return dataset
-
-
 
 # plotting stuff
 def line(logits: t.Tensor) -> None:

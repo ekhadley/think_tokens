@@ -77,7 +77,6 @@ class TrainingConfig:
     eps_decay: float = 0.999995
     eps_min: float = 0.05
 
-    
     def to_dict(self):
         return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 

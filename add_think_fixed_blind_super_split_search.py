@@ -16,13 +16,13 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     think_model.train()
 
     input_max = dataset.attrs["input_max"]
-    ndig = int(math.log10(input_max))
+    ndig = int(math.ceil(math.log10(input_max)))
     q_len = dataset.attrs["question_len"]
     d_normal_vocab = input_max
     d_vocab_total = think_model.cfg.d_vocab_in
     benchmark_accuracy = 0.0  # initialize for progress description
 
-    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_split_search{input_max}", config=cfg.to_dict())
+    wandb.init(project="add_thoughtful_think", name=f"think_fixed_blind_super_split_search{input_max}x{q_len}", config=cfg.to_dict())
     #wandb.config.update(answer_model.cfg.to_dict())
     #wandb.config.update(think_model.cfg.to_dict())
     #wandb.config.update(cfg.to_dict())
@@ -33,7 +33,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     #group_indices = t.arange(group_size, requires_grad=False).unsqueeze(-1)
     #think_indices = t.arange(q_len, q_len + cfg.think_len, requires_grad=False)
 
-    answer_train_stop = 1e12
+    answer_train_stop = 320_000
 
     for b in (tr:=tqdm.trange(len(dataset), ncols=150)):
 
@@ -118,17 +118,20 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
 
 INPUT_MAX = 1_000
 NUM_EXAMPLES = 100_000_000
+NUM_ADDS = 2
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
+    t.manual_seed(42)
+    random.seed(42)
 
     d_thought_vocab = 10
     answer_model_cfg = SplitModelConfig(d_model=32, seq_len=8, d_mlp=128, d_head=16, n_heads=4, n_layers=1, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX, d_thought_vocab=d_thought_vocab)
-    think_model_cfg =  SplitModelConfig(d_model=64, seq_len=8, d_mlp=128, d_head=32, n_heads=4, n_layers=2, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
+    think_model_cfg =  SplitModelConfig(d_model=32, seq_len=8, d_mlp=128, d_head=16, n_heads=4, n_layers=2, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
     #think_model_cfg =  SplitModelConfig(d_model=256, seq_len=32, d_mlp=1024, d_head=32, n_heads=4, n_layers=6, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
     training_cfg = TrainingConfig(
         think_len=3,
-        think_lr=6e-4,
+        think_lr=1e-2,
         answer_lr=1e-3,
         entropy_reward_weight=0.01,
         batch_size=128,
@@ -139,8 +142,7 @@ if __name__ == "__main__":
     answer_model = GPT2SplitModel(answer_model_cfg)
     think_model = GPT2SplitModel(think_model_cfg)
 
-    simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
-    trainset, testset = makeAdditionDataset(INPUT_MAX, NUM_EXAMPLES, train_split=0.995)
+    trainset, testset = makeMultiAdditionDataset(INPUT_MAX, NUM_ADDS, NUM_EXAMPLES, train_split=0.995)
 
     train(answer_model, think_model, training_cfg, trainset)
     benchmark_addition_think_fixed_blind_split(answer_model, think_model, testset, training_cfg.think_len)

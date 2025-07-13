@@ -6,22 +6,10 @@ import pandas as pd
 import numpy as np
 
 from models import GPT2, ModelConfig, TrainingConfig
+from add_normal import benchmark_addition_normal
 from utils import *
 
-@t.inference_mode()
-def benchmark_addition_normal(model: GPT2, dataset: pd.DataFrame):
-    model.eval()
-    q_toks = t.tensor(np.stack(dataset['question_toks']))
-    ans_toks = t.tensor(dataset['answer_tok'].to_numpy())
 
-    logits = model(q_toks).squeeze(0)  # [seq_len, vocab]
-    logprobs = t.log_softmax(logits[:, -1], dim=-1)
-    
-    pred_logprobs = logprobs[t.arange(ans_toks.shape[0]), ans_toks]
-    mean_logprob = pred_logprobs.mean().item()
-    pred_guesses = logprobs.argmax(dim=-1)
-    accuracy = (pred_guesses == ans_toks).float().mean().item()
-    return mean_logprob, accuracy
 
 def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame, testset: pd.DataFrame, is_sweep: bool = False):
     opt = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
@@ -61,6 +49,8 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: pd.DataFrame, testset: pd.D
 def sweep(model: GPT2, trainset: pd.DataFrame, testset: pd.DataFrame, count: int):
     def run_training():
         t.set_default_device(t.device("cuda"))
+        t.manual_seed(42)
+        random.seed(42)
         wandb.init()
         w_config = wandb.config
         training_cfg = TrainingConfig(batch_size=w_config.batch_size,lr=w_config.lr,weight_decay=w_config.weight_decay)
@@ -77,7 +67,7 @@ def sweep(model: GPT2, trainset: pd.DataFrame, testset: pd.DataFrame, count: int
         },
         'parameters': {
             'batch_size': {
-                'values': [16, 32, 64, 128, 256]
+                'values': [32, 64, 128, 256]
             },
             'lr': {
                 'distribution': 'log_uniform_values',
@@ -100,8 +90,8 @@ NUM_EXAMPLES = 10_000_000
 NUM_ADDS = 6
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
-    random.seed(42)
     t.manual_seed(42)
+    random.seed(42)
 
     model_cfg = ModelConfig(d_model=32, seq_len=NUM_ADDS, d_mlp=256, d_head=16, n_heads=4, n_layers=6, d_vocab=INPUT_MAX)
     #training_cfg = TrainingConfig( batch_size=256, lr=1e-3, weight_decay=1e-6)
