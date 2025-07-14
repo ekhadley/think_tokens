@@ -6,8 +6,35 @@ import pandas as pd
 import torch as t
 
 from models import GPT2SplitModel, TrainingConfig, SplitModelConfig
-from add_think_fixed_blind_split import benchmark_addition_think_fixed_blind_split
 from utils import *
+
+def benchmark_addition_think_fixed_blind_split(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, dataset: pd.DataFrame, think_len: int, cat_end_thought: bool = False):
+    answer_model.eval()
+    think_model.eval()
+    q_len = dataset.attrs["question_len"]
+    d_normal_vocab = dataset.attrs["input_max"]
+    n_examples = dataset.attrs["n_examples"]
+    end_thought_token = think_model.cfg.d_thought_vocab - 1
+
+    with t.no_grad():
+        q_toks = t.tensor(np.stack(dataset['question_toks']))
+        ans_toks = t.tensor(dataset['answer_tok'].to_numpy())
+        if cat_end_thought: end_thoughts = t.tensor([end_thought_token] * len(dataset), dtype=t.int64)
+
+        rollouts = q_toks.clone()
+        for i in range(think_len):
+            think_logits = think_model(rollouts)
+            think_toks = think_logits[:, -1].argmax(dim=-1) + d_normal_vocab
+            rollouts = t.cat([rollouts, think_toks.unsqueeze(-1)], dim=1)
+        rollout_no_question = rollouts[:, q_len:] - d_normal_vocab
+        if cat_end_thought: rollout_no_question = t.cat([rollout_no_question, end_thoughts], dim=0)
+        ans_logits = answer_model(rollout_no_question)
+        logprobs = t.log_softmax(ans_logits[:, -1], dim=-1)
+        ans_logprobs = logprobs[t.arange(n_examples), ans_toks]
+        ans_guesses = logprobs.argmax(dim=-1)
+        mean_logprob = ans_logprobs.mean().item()
+        accuracy = (ans_guesses == ans_toks).float().mean().item()
+    return mean_logprob, accuracy
 
 # this version is parallelized over the batch and the group. so keep an eye out.
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, dataset: pd.DataFrame):

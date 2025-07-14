@@ -1,62 +1,14 @@
 from dataclasses import dataclass
 import pandas as pd
 import torch as t
+from torch import Tensor
 from torch import nn
 from torch.nn import functional as F
 from transformers import GPT2TokenizerFast
 
 from utils import *
 
-@dataclass
-class ModelConfig:
-    d_model: int = 512
-    seq_len: int = 512
-    d_mlp: int = 2048
-    d_head: int = 64
-    n_heads: int = 8
-    n_layers: int = 6
-    d_vocab: int = 50257
-    seq_len: int = 512
-    
-    def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
-@dataclass
-class ThinkingModelConfig:
-    d_model: int = 512
-    seq_len: int = 512
-    d_mlp: int = 2048
-    d_head: int = 64
-    n_heads: int = 8
-    n_layers: int = 8
-    d_normal_vocab: int = 50257
-    d_thought_vocab: int = 2048
-    
-    def __post_init__(self):
-        self.d_vocab_total = self.d_normal_vocab + self.d_thought_vocab
-    
-    def to_dict(self):
-        d = {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
-        d['d_vocab_total'] = self.d_vocab_total
-        return d
-
-@dataclass
-class SplitModelConfig:
-    d_model: int = 512
-    seq_len: int = 512
-    d_mlp: int = 2048
-    d_head: int = 64
-    n_heads: int = 8
-    n_layers: int = 6
-    d_vocab: int = 50257
-    seq_len: int = 512
-
-    d_vocab_in: int = 50257
-    d_vocab_out: int = 50257
-    d_thought_vocab: int = 2048
-    
-    def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
 @dataclass
 class TrainingConfig:
@@ -80,6 +32,22 @@ class TrainingConfig:
     def to_dict(self):
         return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
+
+
+@dataclass
+class ModelConfig:
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 6
+    d_vocab: int = 50257
+    seq_len: int = 512
+    
+    def to_dict(self):
+        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(TransformerBlock, self).__init__()
@@ -90,7 +58,7 @@ class TransformerBlock(nn.Module):
         self.linear2 = nn.Linear(cfg.d_mlp, cfg.d_model)
         self.norm2 = nn.LayerNorm(cfg.d_model)
     
-    def forward(self, x: t.Tensor) -> t.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         if x.ndim == 2: x = x.unsqueeze(0)
         seq_len = x.shape[1]
         attn_mask = t.triu(t.ones((seq_len, seq_len)), diagonal=1).bool()
@@ -99,7 +67,6 @@ class TransformerBlock(nn.Module):
         ff_output = self.linear2(self.act(self.linear1(x)))
         x = self.norm2(x + ff_output)
         return x
-
 
 class GPT2(nn.Module):
     def __init__(self, cfg: ModelConfig):
@@ -117,7 +84,7 @@ class GPT2(nn.Module):
         return self.tokenizer.tokenize(text)
     def decode(self, tokens):
         return self.tokenizer.batch_decode(tokens)
-    def forward(self, x: t.Tensor) -> t.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
         x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
         for i, block in enumerate(self.blocks):
@@ -136,6 +103,25 @@ class GPT2(nn.Module):
         return "".join(self.tokenizer.batch_decode(tokens))
 
 
+@dataclass
+class ThinkingModelConfig:
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 8
+    d_normal_vocab: int = 50257
+    d_thought_vocab: int = 2048
+    
+    def __post_init__(self):
+        self.d_vocab_total = self.d_normal_vocab + self.d_thought_vocab
+    
+    def to_dict(self):
+        d = {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        d['d_vocab_total'] = self.d_vocab_total
+        return d
+
 class GPT2Thinking(nn.Module):
     def __init__(self, cfg: ThinkingModelConfig):
         super(GPT2Thinking, self).__init__()
@@ -153,7 +139,7 @@ class GPT2Thinking(nn.Module):
         return t.tensor(self.tokenizer(text).input_ids)
     def decode(self, tokens):
         return self.tokenizer.batch_decode(tokens)
-    def forward(self, x: t.Tensor) -> t.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
         x = self.embed(x) + self.pos_embed(t.arange(x.shape[1])).unsqueeze(0)
         for i, block in enumerate(self.blocks):
@@ -161,7 +147,7 @@ class GPT2Thinking(nn.Module):
         x = self.ln_f(x)
         x = self.unembed(x)
         return x
-    def yap(self, prompt: str, max_length: int = 50) -> t.Tensor:
+    def yap(self, prompt: str, max_length: int = 50) -> Tensor:
         with t.inference_mode():
             tokens = t.tensor(self.tokenizer(prompt).input_ids)
             for _ in range(max_length):
@@ -174,7 +160,7 @@ class GPT2Thinking(nn.Module):
                 next_token = logits[0, -1, :self.cfg.d_normal_vocab].argmax(-1).item()
                 tokens = t.cat((tokens, t.tensor([next_token], device=tokens.device)), dim=0)
         return tokens.squeeze()
-    def seqStr(self, seq: t.Tensor) -> str:
+    def seqStr(self, seq: Tensor) -> str:
         out = ""
         seq = seq.squeeze()
         for token in seq:
@@ -185,9 +171,27 @@ class GPT2Thinking(nn.Module):
             else:
                 out += f"{cyan}<think{token.item() - self.cfg.d_normal_vocab}>{endc}"
         return out
-    def printSeq(self, seq: t.Tensor) -> None:
+    def printSeq(self, seq: Tensor) -> None:
         print("\n", self.seqStr(seq))
 
+
+@dataclass
+class SplitModelConfig:
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 6
+    d_vocab: int = 50257
+    seq_len: int = 512
+
+    d_vocab_in: int = 50257
+    d_vocab_out: int = 50257
+    d_thought_vocab: int = 2048
+    
+    def to_dict(self):
+        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
 class GPT2SplitModel(nn.Module):
     def __init__(self, cfg: SplitModelConfig):
@@ -201,7 +205,7 @@ class GPT2SplitModel(nn.Module):
 
         self.eot = cfg.d_vocab_in - 1
 
-    def forward(self, x: t.Tensor) -> t.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
         x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
         for i, block in enumerate(self.blocks):
@@ -209,3 +213,73 @@ class GPT2SplitModel(nn.Module):
         x = self.ln_f(x)
         x = self.unembed(x)
         return x
+
+
+@dataclass
+class ContThinkingModelConfig:
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 6
+    d_vocab: int = 50257
+    seq_len: int = 512
+
+    n_think_layers: int = None
+
+    def __post_init__(self):
+        if self.n_think_layers is None:
+            self.n_think_layers = self.n_layers - 1
+
+    def to_dict(self):
+        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+
+# A single model that functions as 2.
+# The thinking portion is most of the model. It does not output distributions over discrete tokens,
+# but continuous latent vectors act as its chain of thought. It does this for a set number of steps,
+# concatenating  to its own input context recursively. The latent thinking vectors are simply the residual
+# stream vectors at some layer in the model, specific in the config.
+# The last layers of this model are the answering policy. You can provide an attention mask while getting
+# real token predictions. This can be used to prevent the answer policy from attending to any undesired context.
+
+# It's input is not a sequence of tokens, but a sequence of continuous vectors called the context.
+# the context vector for normal input tokens is simply the embedding. As the model prodces its own
+# thinking vectors, these get concatenated to the context.
+class ContThinkingModel(nn.Module):
+    def __init__(self, cfg: ModelConfig):
+        super(ContThinkingModel, self).__init__()
+        self.cfg = cfg
+        self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
+        self.ln_f = nn.LayerNorm(cfg.d_model)
+        self.embed = nn.Embedding(cfg.d_vocab, cfg.d_model)
+        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
+        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
+
+        self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
+        
+    def generate_thought(self, x: Tensor) -> Tensor:
+        if x.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
+        assert x.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
+
+        for i, block in enumerate(self.blocks[:self.cfg.n_think_layers]):
+            x = block(x)
+        
+        return x[:, -1, :] # return the residual stream after applying the thinking layers
+    
+    def generate_logits(self, x: Tensor) -> Tensor: # get the prediction logits for the next token
+        if x.ndim == 2: x = x.unsqueeze(0)  # Ensure context is 3D
+        assert x.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
+
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+
+        x = self.ln_f(x[:, -1, :]) # Toss unecessary context.
+        distn = self.unembed(x) # unembed the last position residual stream to get next token distn
+        return distn
+
+    def make_context(self, tokens: Tensor) -> Tensor: # simply returns the embedding of the tokens as the context
+        if tokens.ndim == 1: tokens = tokens.unsqueeze(0)  # Ensure tokens is 2D
+        seq_len = tokens.shape[1]
+        ctx = self.embed(tokens) + self.pos_embed(t.arange(seq_len)).unsqueeze(0)
+        return ctx

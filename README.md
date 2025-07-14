@@ -1,3 +1,13 @@
+- stuff:
+    - hyperparameter success: the thinking models can mostly match the addition sizes of the normal model.
+    - hyperparameter difficulties
+        - larger additions become possible with a wider model, not a longer one
+        - training runs are not very deterministic: based on the weight init, some runs succeed while others fail.
+    - Maybe addition is a bad toy task? it isnt that fundamentally serial
+    - attempting the continuous thoughts version:
+        - to generate a continuous thought, simply stop on an earlier layer and return the residual stream vector
+        - This vector gets appended to the input context. The context vector for normal tokens is simply the embedding, as usual.
+        - We recursively feed it through to get more thinking tokens, with gradients on the whole time, just like an rnn.
 
 - naming conventions:
     - *add*: training a model for the toy task of modular addition
@@ -57,6 +67,22 @@
         - maybe no more toy problems and just do the thing?
     - But idk, isnt the whole point that it might learn an alternative strategy? 
         - Like if it's in the bandwidth bottlenecked regime on addition and has the opportunity to split its computation among multiple steps and it can't learn to do that, then the thing just doesn't work.
+
+- So what sub-problem am I currently tackling?
+    - We are focusing on fixed: + split + blind + super.
+        - fixed number of  thinking tokens
+        - answering and thinking policies are split; separate models
+        - the thinking policy sees full context and produces a chain of thought. The answering policy only sees the chain of thought, not any other context.
+        - and the are training the answering policy with a predetermined chain of thought sceme which the thinking policy must learn to reproduce based on reward signals.
+    - We know the issue is not ONLY failure of signal between the models, becuase even with direct supervised training on correct rollouts (not doing it through rl), the model fails for max>>100.
+    - Investiagtion reveals that this is due to the predetermined rollout scheme we chose, which was having 10 different thought tokens and using them to spell out the answer in digits.
+        - This alleviates much of the difficulty, but not all!
+        - For the least sig digit the thinking policy need not consider carries. Simple mod10 addition.
+        - The thinking policy now must predict the second least sig digit given the first. just becuase we know the least sig digit of the sum does not tell us wether there was carry for free!
+        - For the second least sig, we have to both do the mod10 for this digit and find the carry of the first digit, given its post carry value.
+        - Etc. for max=500 we see the first thought token rollout be near perfect accuracy, the second be also entirely accurate but 10x less so than the first (in logprob terms)
+            - And for the last it clearly has some idea of what's going on but is rarely confident and often confidently wrong.
+        - However if i double all the dimensions of the model (but dont change the number of layers), it instead remains high entropy for the least sig digit, but learns the later 2 perfectly.
 
 - AEs work beucase gradients flow from the output, decoder, latent representation, encoder, and inputs.
     - All the approaches here don't have that property becuase tokenization severs the gradients.

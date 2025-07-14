@@ -97,7 +97,7 @@ def sweep(model: GPT2, trainset: pd.DataFrame, testset: pd.DataFrame, count: int
     sweep_id = wandb.sweep(sweep_config, project="add-sweep")
     wandb.agent(sweep_id, function=run_training, count=count)
 
-INPUT_MAX = 500
+INPUT_MAX = 400
 NUM_EXAMPLES = 50_000_000
 NUM_ADDS = 2
 
@@ -106,11 +106,7 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    # ns, ws, nl, wl
     model_cfg = ModelConfig(d_model=32, seq_len=3, d_mlp=256, d_head=16, n_heads=4, n_layers=2, d_vocab=INPUT_MAX) # narrow, short
-    #model_cfg = ModelConfig(d_model=64, seq_len=3, d_mlp=512, d_head=32, n_heads=4, n_layers=2, d_vocab=INPUT_MAX) # wide, short
-    #model_cfg = ModelConfig(d_model=32, seq_len=3, d_mlp=256, d_head=16, n_heads=4, n_layers=6, d_vocab=INPUT_MAX) # narrow, long
-    #model_cfg = ModelConfig(d_model=64, seq_len=3, d_mlp=512, d_head=32, n_heads=4, n_layers=6, d_vocab=INPUT_MAX) # wide, long
     
     #model_cfg = ModelConfig(d_model=512, seq_len=3, d_mlp=1024, d_head=64, n_heads=8, n_layers=12, d_vocab=INPUT_MAX)
     training_cfg = TrainingConfig(
@@ -125,5 +121,4 @@ if __name__ == "__main__":
     #rainset, testset = makeAdditionDataset(INPUT_MAX, NUM_EXAMPLES, train_split=0.9999)
     trainset, testset = makeMultiAdditionDataset(INPUT_MAX, NUM_ADDS, NUM_EXAMPLES, train_split=0.999)
 
-    #rain(model, training_cfg, trainset, testset)
-    sweep(model, trainset, testset, count=128)
+    train(model, training_cfg, trainset, testset)
