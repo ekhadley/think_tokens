@@ -179,6 +179,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, dataset: pd.DataFrame):
 
 INPUT_MAX = 100
 NUM_EXAMPLES = 1_000_000
+NUM_ADDITIONS = 2
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
@@ -199,8 +200,7 @@ if __name__ == "__main__":
     )
     model = GPT2Thinking(model_cfg)
 
-    simple_tokenizer = SimpleTokenizer(max_int=INPUT_MAX)
-    trainset, testset = makeAdditionDataset(simple_tokenizer, INPUT_MAX, NUM_EXAMPLES, train_split=0.99)
+    trainset, testset = makeMultiAdditionDataset(INPUT_MAX, NUM_ADDITIONS, NUM_EXAMPLES, train_split=0.99)
 
     train(model, training_cfg, trainset)
     benchmark_addition_think(model, testset)
