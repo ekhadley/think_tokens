@@ -97,7 +97,7 @@ def sweep(model: GPT2, trainset: pd.DataFrame, testset: pd.DataFrame, count: int
     sweep_id = wandb.sweep(sweep_config, project="add-sweep")
     wandb.agent(sweep_id, function=run_training, count=count)
 
-INPUT_MAX = 400
+INPUT_MAX = 500
 NUM_EXAMPLES = 50_000_000
 NUM_ADDS = 2
 
@@ -106,12 +106,13 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    model_cfg = ModelConfig(d_model=32, seq_len=3, d_mlp=256, d_head=16, n_heads=4, n_layers=2, d_vocab=INPUT_MAX) # narrow, short
+    #model_cfg = ModelConfig(d_model=32, seq_len=3, d_mlp=256, d_head=16, n_heads=4, n_layers=2, d_vocab=INPUT_MAX) # narrow, short
+    model_cfg = ModelConfig(d_model=128, seq_len=3, d_mlp=512, d_head=64, n_heads=8, n_layers=2, d_vocab=INPUT_MAX) # narrow, short
     
     #model_cfg = ModelConfig(d_model=512, seq_len=3, d_mlp=1024, d_head=64, n_heads=8, n_layers=12, d_vocab=INPUT_MAX)
     training_cfg = TrainingConfig(
         batch_size=128,
-        lr=6e-4,
+        lr=1e-4,
         weight_decay=1e-9,
         adam_beta1=0.9,
         adam_beta2=0.95

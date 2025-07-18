@@ -73,29 +73,18 @@ def train(model: ContThinkingModel, cfg: TrainingConfig, dataset: pd.DataFrame):
         print(yellow, logits.shape, endc)
         logprobs = t.log_softmax(logits, dim=-1)
         loss = logprobs[batch_indices, ans_toks]
+        loss.backward()
+        opt.step()
 
         exit()
         
-        with t.inference_mode():
-            pred_prob_var = t.exp(pred_rewards).var().item() # answer prob variance for logging
-            pred_reward_var = pred_rewards.var().item() # variance of the predicted rewards for logging
+        wandb.log({"pred_reward": loss})
+        tr.set_description(f"{magenta}pred loss: {loss.detach().item():.3f} bench acc: {benchmark_accuracy:.4f}")
+        if b*cfg.batch_size % 32_000 == 0:
+            _, benchmark_accuracy = benchmark_addition_think_fixed_cont(model, testset, cfg.think_len)
 
-            wandb.log({
-                "pred_reward": pred_reward_mean,
-                "think_reward": think_reward,
-                "num_think": cfg.think_len,
-                "pred_reward_var": pred_reward_var,
-                "pred_prob_var": pred_prob_var,
-                "epsilon": epsilon,
-            })
-            #printSeq(rollouts[0], simple_tokenizer, model.cfg)
-            tr.set_description(f"{magenta}pred loss: {pred_reward/full_batch_size:.3f}, pred reward: {pred_reward_mean:.3f}, epsilon: {epsilon:.3f} bench acc: {benchmark_accuracy:.4f}")
-
-            if b*cfg.batch_size % 32_000 == 0:
-                _, benchmark_accuracy = benchmark_addition_think_fixed_cont(model, testset, cfg.think_len)
-
-                wandb.log({"benchmark_accuracy": benchmark_accuracy})
-                #t.save(model.state_dict(), f"saves/add_think_fixed_cont{b}.pth")
+            wandb.log({"benchmark_accuracy": benchmark_accuracy})
+            #t.save(model.state_dict(), f"saves/add_think_fixed_cont{b}.pth")
 
 
 INPUT_MAX = 100

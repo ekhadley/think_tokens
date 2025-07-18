@@ -160,7 +160,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 #t.save(think_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_think{b}.pth")
 
 
-INPUT_MAX = 300
+INPUT_MAX = 500
 NUM_EXAMPLES = 50_000_000
 NUM_ADDS = 2
 
@@ -172,12 +172,12 @@ if __name__ == "__main__":
     d_thought_vocab = 10
     think_len = 3
     answer_model_cfg = SplitModelConfig(d_model=32, seq_len=8, d_mlp=128, d_head=16, n_heads=4, n_layers=1, d_vocab_in=d_thought_vocab, d_vocab_out=INPUT_MAX, d_thought_vocab=d_thought_vocab)
-    think_model_cfg =  SplitModelConfig(d_model=32, seq_len=8, d_mlp=128, d_head=16, n_heads=4, n_layers=4, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
-    #think_model_cfg =  SplitModelConfig(d_model=64, seq_len=8, d_mlp=256, d_head=32, n_heads=8, n_layers=2, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
+    #think_model_cfg =  SplitModelConfig(d_model=32, seq_len=8, d_mlp=128, d_head=16, n_heads=4, n_layers=4, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
+    think_model_cfg =  SplitModelConfig(d_model=128, seq_len=8, d_mlp=512, d_head=64, n_heads=8, n_layers=2, d_vocab_in=INPUT_MAX + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
     training_cfg = TrainingConfig(
         think_len=think_len,
         answer_lr=1e-3,
-        think_lr=1e-3,
+        think_lr=1e-4,
         batch_size=64,
         weight_decay=1e-9,
         entropy_reward_weight=0.0,
