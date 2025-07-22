@@ -23,8 +23,12 @@ def train(model, cfg: TrainingConfig, trainset: datasets.Dataset, testset: datas
 
     model.train()
 
-    wandb.init(project="gpt_chess", name="gpt2s_chess_normal", config=cfg)
-    wandb.config.update(cfg.to_dict())
+    wandb.init(project="gpt_chess", name="normal", config=cfg)
+    run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
+    wandb.config.update(run_cfg)
+
+    parameters = [p for p in model.parameters() if p.requires_grad]
+    grad_norm = 42069
 
     dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
     accuracy = 0.0
@@ -38,9 +42,10 @@ def train(model, cfg: TrainingConfig, trainset: datasets.Dataset, testset: datas
             loss.backward()
             optimizer.step()
             
+            grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in parameters]), 2.0).item()
 
-            wandb.log({"loss": loss.item(), "acc": accuracy})
-            tr.set_description(f"{magenta}loss: {loss.item():.3f}, acc: {accuracy:.3f}")
+            wandb.log({"loss": loss.item(), "acc": accuracy, "grad_norm": grad_norm})
+            tr.set_description(f"{magenta}loss: {loss.item():.3f}, acc: {accuracy:.3f}, grad_norm: {grad_norm:.3f}")
 
             if i % 32 == 0:
                 accuracy, _ = test_accuracy(model, testset)
@@ -104,17 +109,7 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    #d_model = 512
-    #model_cfg = ModelConfig(
-        #d_model=d_model,
-        #seq_len=128,
-        #d_mlp=d_model*4,
-        #d_head=d_model//8,
-        #n_heads=8,
-        #n_layers=2,
-        #d_vocab=64
-    #)
-    d_model = 128
+    d_model = 512
     model_cfg = ModelConfig(
         d_model=d_model,
         seq_len=128,
@@ -127,8 +122,8 @@ if __name__ == "__main__":
     model = GPT2(model_cfg)
 
     training_cfg = TrainingConfig(
-        batch_size=32,
-        lr=1e-4,
+        batch_size=128,
+        lr=6e-4,
         weight_decay=1e-6,
     )
 

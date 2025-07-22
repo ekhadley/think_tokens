@@ -307,6 +307,7 @@ class RecycleModelConfig:
 class Recycler(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super(Recycler, self).__init__()
+        assert cfg.recycle_layer < cfg.n_layers, "Recycle layer must be less than total layers"
         self.cfg = cfg
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.d_model)

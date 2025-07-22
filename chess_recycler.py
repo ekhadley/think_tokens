@@ -32,21 +32,24 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
     model.train()
 
-    wandb.init(project="gpt_chess", name="chess_recycler", config=cfg)
-    wandb.config.update(cfg.to_dict())
+    wandb.init(project="gpt_chess", name="recycler", config=cfg)
+    run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
+    wandb.config.update(run_cfg)
     batch_size = cfg.batch_size
-    #seq_len = model.cfg.seq_len
     seq_len = dataset['input_ids'].shape[1]
     d_model = model.cfg.d_model
     d_vocab = model.cfg.d_vocab
+
+    parameters = [p for p in model.parameters() if p.requires_grad]
+    grad_norm = 42069
+
 
     dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
     accuracy = 0.0
     for epoch in range(epochs):
         for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
             tokens = batch['input_ids']
-            #print()
-            #print(red, tokens, endc)
+            batch_size, seq_len = tokens.shape
             
             ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
             logits = t.zeros((batch_size, seq_len, d_vocab)) # preaallocate context instead of cating
@@ -57,22 +60,15 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                 logits[:, s, :] = new_logits
             logprobs = t.log_softmax(logits, dim=-1)
             loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
-
-            #toks0 = tokens[:, 0].reshape(-1, 1)
-            #toks1 = tokens[:, 1].reshape(-1, 1)
-            #toks2 = tokens[:, 2].reshape(-1, 1)
-
-            #ctx, _ = model.forward(toks0)
-            #ctx = ctx.reshape(batch_size, 1, d_model)
-            #_, logits = model.forward(toks1, ctx)
-            #logprobs = t.log_softmax(logits, dim=-1)
-            #loss = -logprobs[t.arange(batch_size), toks2.squeeze()].mean()
-
+            
             loss.backward()
+            #t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()    
+            grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in parameters]), 2.0).item()
+            optimizer.zero_grad()
 
-            wandb.log({"loss": loss.item(), "acc": accuracy})
-            tr.set_description(f"{magenta}loss: {loss.item():.3f}, acc: {accuracy:.3f}")
+            wandb.log({"loss": loss.item(), "acc": accuracy, "grad_norm": grad_norm})
+            tr.set_description(f"{magenta}loss: {loss.item():.3f}, acc: {accuracy:.3f}, grad_norm: {grad_norm:.3f}")
             time.sleep(0.1)
 
             if i % 32 == 0:
@@ -85,22 +81,22 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 128
+    d_model = 512
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=128,
         d_mlp=d_model*4,
         d_head=d_model//8,
         n_heads=8,
-        n_layers=10,
+        n_layers=8,
         d_vocab=64,
-        recycle_layer=8
+        recycle_layer=6
     )
     model = Recycler(model_cfg)
 
     training_cfg = TrainingConfig(
-        batch_size=32,
-        lr=1e-4,
+        batch_size=128,
+        lr=3e-4,
         weight_decay=1e-6,
     )
 
