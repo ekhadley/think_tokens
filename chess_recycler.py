@@ -81,7 +81,7 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 64
+    d_model = 512
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=128,
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     model = Recycler(model_cfg)
 
     training_cfg = TrainingConfig(
-        batch_size=32,
+        batch_size=128,
         lr=3e-4,
         weight_decay=1e-6,
     )
