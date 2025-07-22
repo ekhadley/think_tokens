@@ -81,7 +81,7 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 512
+    d_model = 64
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=128,
@@ -95,12 +95,12 @@ if __name__ == "__main__":
     model = Recycler(model_cfg)
 
     training_cfg = TrainingConfig(
-        batch_size=128,
+        batch_size=32,
         lr=3e-4,
         weight_decay=1e-6,
     )
 
-    dataset = datasets.load_from_disk(f"./datasets/chess_40moves_3min_hf")
+    dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]
     dataset.set_format(type='torch')
     trainset, testset = dataset.train_test_split(test_size=0.01).values()
     

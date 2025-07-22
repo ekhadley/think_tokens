@@ -127,7 +127,7 @@ if __name__ == "__main__":
         weight_decay=1e-6,
     )
 
-    dataset = datasets.load_from_disk("./datasets/chess_40moves_3min_hf")
+    dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]
     dataset.set_format(type='torch')
     trainset, testset = dataset.train_test_split(test_size=0.01).values()
     
