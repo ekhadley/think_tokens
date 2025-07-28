@@ -12,12 +12,13 @@ def test_accuracy_recycler(model: Recycler, dataset: datasets.Dataset) -> tuple[
     tokens = dataset['input_ids']
     batch_size, seq_len = tokens.shape
     
-    ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
+    #ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
+    ctx = None
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab)) # preaallocate context instead of cating
     for s in range(seq_len):
         toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-        new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None) # process the next token with the current context
-        ctx[:, s, :] = new_ctx # update the context with the new context vector
+        #new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None) # process the next token with the current context
+        ctx, new_logits = model.forward2(toks, ctx) # process the next token with the current context
         logits[:, s, :] = new_logits
     logprobs = t.log_softmax(logits, dim=-1)
     logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
@@ -32,7 +33,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
     model.train()
 
-    wandb.init(project="gpt_chess", name="recycler", config=cfg)
+    wandb.init(project="gpt_chess", name="recycler_mutate", config=cfg)
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
     wandb.config.update(run_cfg)
     batch_size = cfg.batch_size
@@ -51,18 +52,21 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             tokens = batch['input_ids']
             batch_size, seq_len = tokens.shape
             
-            ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
+            #ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
+            ctx = None
             logits = t.zeros((batch_size, seq_len, d_vocab)) # preaallocate context instead of cating
             for s in range(seq_len):
                 toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-                new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None) # process the next token with the current context
-                ctx[:, s, :] = new_ctx # update the context with the new context vector
+                #new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
+                #ctx[:, s, :] = new_ctx # update the context with the new context vector
+                ctx, new_logits = model.forward2(toks, ctx)
+                
                 logits[:, s, :] = new_logits
             logprobs = t.log_softmax(logits, dim=-1)
             loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
             
             loss.backward()
-            #t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
             optimizer.step()    
             grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in parameters]), 2.0).item()
             optimizer.zero_grad()
@@ -81,27 +85,27 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 512
+    d_model = 128
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=128,
         d_mlp=d_model*4,
-        d_head=d_model//8,
+        d_head=d_model//2,
         n_heads=8,
-        n_layers=8,
+        n_layers=6,
         d_vocab=64,
-        recycle_layer=6
+        recycle_layer=4
     )
     model = Recycler(model_cfg)
 
     training_cfg = TrainingConfig(
-        batch_size=128,
-        lr=3e-4,
-        weight_decay=1e-6,
+        batch_size=32,
+        lr=1e-4,
+        weight_decay=1e-9,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]
     dataset.set_format(type='torch')
     trainset, testset = dataset.train_test_split(test_size=0.01).values()
     
-    train(model, training_cfg, trainset, testset, epochs=5)
+    train(model, training_cfg, trainset, testset, epochs=10)

@@ -21,7 +21,7 @@ yellow = '\x1b[38;2;255;255;0m'
 red = '\x1b[38;2;255;0;0m'
 pink = '\x1b[38;2;255;51;204m'
 orange = '\x1b[38;2;255;51;0m'
-green = '\x1b[38;2;0;0;128m'
+green = '\x1b[38;2;5;170;20m'
 gray = '\x1b[38;2;127;127;127m'
 magenta = '\x1b[38;2;128;0;128m'
 white = '\x1b[38;2;255;255;255m'
@@ -135,8 +135,13 @@ def loadTokenizedDataset(name: str):
     return dataset
 
 # plotting stuff
-def line(logits: t.Tensor) -> None:
-    plot = plotly.graph_objects.Figure()
+def line(logits: t.Tensor, ymin: float|None = None, ymax: float|None = None) -> None:
+    if ymax is not None:
+        assert ymin is not None, "If ymax is specified, ymin must also be specified."
+        plot = plotly.graph_objects.Figure(layout_yaxis_range=[ymin, ymax])
+    else:
+        assert ymin is None, "If ymin is specified, ymax must also be specified."
+        plot = plotly.graph_objects.Figure()
     plot.add_trace(plotly.graph_objects.Scatter(y=logits.squeeze().cpu().numpy(), mode='lines', name='logits'))
     plot.show()
 

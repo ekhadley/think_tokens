@@ -33,7 +33,6 @@ class TrainingConfig:
         return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
 
-
 @dataclass
 class ModelConfig:
     d_model: int = 512
@@ -131,7 +130,7 @@ class GPT2Thinking(nn.Module):
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
-        self.eot = 50256
+        #self.eot = 50256
         self.end_thought = cfg.d_vocab_total - 1
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
@@ -216,76 +215,6 @@ class GPT2SplitModel(nn.Module):
 
 
 @dataclass
-class ContThinkingModelConfig:
-    d_model: int = 512
-    seq_len: int = 512
-    d_mlp: int = 2048
-    d_head: int = 64
-    n_heads: int = 8
-    n_layers: int = 6
-    d_vocab: int = 50257
-    seq_len: int = 512
-
-    n_think_layers: int = None
-
-    def __post_init__(self):
-        if self.n_think_layers is None:
-            self.n_think_layers = self.n_layers - 1
-
-    def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
-
-# A single model that functions as 2.
-# The thinking portion is most of the model. It does not output distributions over discrete tokens,
-# but continuous latent vectors act as its chain of thought. It does this for a set number of steps,
-# concatenating  to its own input context recursively. The latent thinking vectors are simply the residual
-# stream vectors at some layer in the model, specific in the config.
-# The last layers of this model are the answering policy. You can provide an attention mask while getting
-# real token predictions. This can be used to prevent the answer policy from attending to any undesired context.
-
-# It's input is not a sequence of tokens, but a sequence of continuous vectors called the context.
-# the context vector for normal input tokens is simply the embedding. As the model prodces its own
-# thinking vectors, these get concatenated to the context.
-class ContThinkingModel(nn.Module):
-    def __init__(self, cfg: ModelConfig):
-        super(ContThinkingModel, self).__init__()
-        self.cfg = cfg
-        self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
-        self.ln_f = nn.LayerNorm(cfg.d_model)
-        self.embed = nn.Embedding(cfg.d_vocab, cfg.d_model)
-        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
-        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
-
-        self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
-        
-    def generate_thought(self, x: Tensor) -> Tensor:
-        if x.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
-        assert x.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
-
-        for i, block in enumerate(self.blocks[:self.cfg.n_think_layers]):
-            x = block(x)
-        
-        return x[:, -1, :] # return the residual stream after applying the thinking layers
-    
-    def generate_logits(self, x: Tensor) -> Tensor: # get the prediction logits for the next token
-        if x.ndim == 2: x = x.unsqueeze(0)  # Ensure context is 3D
-        assert x.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
-
-        for i, block in enumerate(self.blocks):
-            x = block(x)
-
-        x = self.ln_f(x[:, -1, :]) # Toss unecessary context.
-        distn = self.unembed(x) # unembed the last position residual stream to get next token distn
-        return distn
-
-    def make_context(self, tokens: Tensor) -> Tensor: # simply returns the embedding of the tokens as the context
-        if tokens.ndim == 1: tokens = tokens.unsqueeze(0)  # Ensure tokens is 2D
-        seq_len = tokens.shape[1]
-        ctx = self.embed(tokens) + self.pos_embed(t.arange(seq_len)).unsqueeze(0)
-        return ctx
-
-
-@dataclass
 class RecycleModelConfig:
     d_model: int = 512
     seq_len: int = 512
@@ -340,13 +269,142 @@ class Recycler(nn.Module):
         x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0) # Add positional embeddings
         for i, block in enumerate(self.blocks):
             x = block(x)
+            if seq_len >= 10 and seq_len < 16 and i ==3:
+                imshow(x[0], title=f"seq_len {seq_len}, layer {i}")
             if i == self.cfg.recycle_layer:
                 new_context = x[:, -1, :]  # Store the context vector from the specified layer
                 if not need_distn: return new_context # if we don't need the distribution, return the context vector immediately
         x = self.ln_f(x[:, -1, :]) # Toss unecessary context.
         distn = self.unembed(x) # unembed the last position residual stream to get next token distn
         return new_context, distn
-        #return token_embed.squeeze(), distn
+
+    def forward2(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        assert token is not None or context is not None, "Either a first token or an context state must be provided"
+        if token.ndim == 1: token = token.unsqueeze(0)
+        assert token.ndim == 2, "Token should be single item or 1D tensor"
+
+        token_embed = self.embed(token) if token is not None else None
+        if context is not None:
+            if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
+            assert context.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
+        if context is not None and token_embed is not None:
+            x = t.cat([context, token_embed], dim=1)  # Concatenate context with the new token embedding
+        elif context is None: x = token_embed
+        else: x = context
+        seq_len = x.shape[1]
+
+        x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0)
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            if i == self.cfg.recycle_layer:
+                if not need_distn: return x
+        x = self.ln_f(x)
+        distn = self.unembed(x[:, -1, :])
+        return x, distn
+
+    # forward pass for a single string of tokens.
+    # Has to sequentially process  each token to accumulate hidden state context.
+    # Returns full context for the sequence.
+    def process_seq(self, tokens: Tensor) -> Tensor:
+        if tokens.ndim == 1: tokens = tokens.unsqueeze(0)  # Ensure tokens is 2D
+        bsize = tokens.shape[0]
+        seq_len = tokens.shape[1]
+        ctx = tokens.new_zeros((bsize, seq_len, self.cfg.d_model))
+        new_ctx = self.forward(token = tokens[:, 0], context = None, need_distn=False) # Get initial context for the first token
+        for i in range(1, seq_len):
+            new_ctx = self.forward(token = tokens[:, i], context = new_ctx, need_distn=False) # Process each
+            ctx[:, i] = new_ctx
+        return ctx
+
+
+
+@dataclass
+class ContThinkingModelConfig:
+    d_model: int = 512
+    seq_len: int = 512
+    d_mlp: int = 2048
+    d_head: int = 64
+    n_heads: int = 8
+    n_layers: int = 6
+    d_vocab: int = 50257
+    seq_len: int = 512
+    recycle_layer: int = None
+
+    def __post_init__(self):
+        if self.recycle_layer is None:
+            self.recycle_layer = self.n_layers - 1
+    
+    def to_dict(self):
+        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+
+class ContThinkingModel(nn.Module):
+    def __init__(self, cfg: ModelConfig):
+        super(ContThinkingModel, self).__init__()
+        assert cfg.recycle_layer < cfg.n_layers, "Recycle layer must be less than total layers"
+        self.cfg = cfg
+        self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
+        self.ln_f = nn.LayerNorm(cfg.d_model)
+        self.embed = nn.Embedding(cfg.d_vocab, cfg.d_model)
+        self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
+        self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
+        self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
+        
+    # forward passes like an rnn. Takes a continuous 2d context of previous text and a single new token, outputs the new context vector and a distn for next token prediction
+    # the context vector is one of the later layer hidden states (residual stream vectors) for the last token position. Context is combined by simple concatenation.
+    def forward(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        assert token is not None or context is not None, "Either a first token or an context state must be provided"
+        if token.ndim == 1: token = token.unsqueeze(0)
+        assert token.ndim == 2, "Token should be single item or 1D tensor"
+
+        token_embed = self.embed(token) if token is not None else None
+        if context is not None:
+            if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
+            assert context.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
+
+        if context is not None and token_embed is not None:
+            x = t.cat([context, token_embed], dim=1)  # Concatenate context with the new token embedding
+        elif context is None:
+            x = token_embed
+        else:
+            x = context
+
+        seq_len = x.shape[1]
+
+        x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0) # Add positional embeddings
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            if seq_len >= 10 and seq_len < 16 and i ==3:
+                imshow(x[0], title=f"seq_len {seq_len}, layer {i}")
+            if i == self.cfg.recycle_layer:
+                new_context = x[:, -1, :]  # Store the context vector from the specified layer
+                if not need_distn: return new_context # if we don't need the distribution, return the context vector immediately
+        x = self.ln_f(x[:, -1, :]) # Toss unecessary context.
+        distn = self.unembed(x) # unembed the last position residual stream to get next token distn
+        return new_context, distn
+
+    def forward2(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        assert token is not None or context is not None, "Either a first token or an context state must be provided"
+        if token.ndim == 1: token = token.unsqueeze(0)
+        assert token.ndim == 2, "Token should be single item or 1D tensor"
+
+        token_embed = self.embed(token) if token is not None else None
+        if context is not None:
+            if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
+            assert context.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
+        if context is not None and token_embed is not None:
+            x = t.cat([context, token_embed], dim=1)  # Concatenate context with the new token embedding
+        elif context is None: x = token_embed
+        else: x = context
+        seq_len = x.shape[1]
+
+        x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0)
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            if i == self.cfg.recycle_layer:
+                if not need_distn: return x
+        x = self.ln_f(x)
+        distn = self.unembed(x[:, -1, :])
+        return x, distn
 
     # forward pass for a single string of tokens.
     # Has to sequentially process  each token to accumulate hidden state context.
