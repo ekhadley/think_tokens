@@ -10,7 +10,7 @@ from tae import test_acc
 
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, steps: int = 1e9):
     answer_params, think_params = list(answer_model.parameters()), list(think_model.parameters())
-    opt = t.optim.AdamW(answer_params + think_params, lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
+    opt = t.optim.AdamW(answer_params + think_params, lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
     answer_model.train()
     think_model.train()
 
@@ -72,7 +72,6 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 #t.save(think_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_think{b}.pth")
 
 
-
 INP_MAX = 64
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
@@ -109,8 +108,7 @@ if __name__ == "__main__":
     think_model = GPT2SplitModel(think_model_cfg)
 
     training_cfg = TrainingConfig(
-        think_lr=1e-4,
-        answer_lr=1e-4,
+        lr=1e-4,
         think_len=think_len,
         group_size=16,
         batch_size=64,
