@@ -6,18 +6,37 @@ import datasets
 from utils import *
 from models import GPT2SplitModel, TrainingConfig, SplitModelConfig
 
-MOVE_IDX = 20
+@t.inference_mode()
+def test_acc(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, inp_max: int) -> tuple[t.Tensor, t.Tensor]:
+    inp_toks = t.arange(0, inp_max).reshape(-1, 1)
+    rollouts = inp_toks.clone()
+    
+    for i_t in range(cfg.think_len): # generate thinking tokens
+        think_logits = think_model(rollouts)
+        think_toks = think_logits[:, -1].argmax(dim=-1, keepdim=True) + inp_max
+        rollouts = t.cat([rollouts, think_toks], dim=1)
+
+    rollout_thoughts = rollouts[:, 1:] - inp_max
+    pred_logits = answer_model(rollout_thoughts)
+    pred_logprobs = t.log_softmax(pred_logits[:, -1], dim=-1)
+    logpbrobs_on_correct = pred_logprobs[inp_toks.squeeze(), inp_toks.squeeze()] # heh.
+    preds = pred_logprobs.argmax(dim=-1).squeeze()
+    acc = (preds == inp_toks.squeeze()).float().mean()
+    return logpbrobs_on_correct, acc
+
 
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, steps: int = 1e9):
-    #answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
-    #think_opt = t.optim.AdamW(think_model.parameters(), lr=cfg.think_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
-    answer_opt = t.optim.SGD(answer_model.parameters(), lr=cfg.answer_lr, momentum=0.9, weight_decay=cfg.weight_decay)
-    think_opt = t.optim.SGD(think_model.parameters(), lr=cfg.think_lr, momentum=0.9, weight_decay=cfg.weight_decay)
+    answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
+    think_opt = t.optim.AdamW(think_model.parameters(), lr=cfg.think_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
+    #answer_opt = t.optim.SGD(answer_model.parameters(), lr=cfg.answer_lr, momentum=0.9, weight_decay=cfg.weight_decay)
+    #think_opt = t.optim.SGD(think_model.parameters(), lr=cfg.think_lr, momentum=0.9, weight_decay=cfg.weight_decay)
     answer_model.train()
     think_model.train()
 
+    logits_bias = 1
+
     run_cfg = {"answer_model": answer_model.cfg.to_dict(), "think_model": think_model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="tokenized_autoencoder", config=run_cfg)
+    wandb.init(project="tokenized_autoencoder", config=run_cfg, name=f"sample_bias+{logits_bias}")
 
     think_parameters = [p for p in think_model.parameters() if p.requires_grad]
     answer_parameters = [p for p in answer_model.parameters() if p.requires_grad]
@@ -45,7 +64,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
 
             for i_t in range(cfg.think_len): # generate thinking tokens
                 think_logits = think_model(rollouts)
-                if b < 8_000000: think_logits[full_batch_indices, :, inp_toks.flatten()] += 1
+                if b < 8_000000: think_logits[full_batch_indices, :, inp_toks.flatten()] += logits_bias
                 think_probs = t.softmax(think_logits[:, -1], dim=-1)
                 think_toks = t.multinomial(think_probs, num_samples=1) + inp_max
                 #if random.random() < epsilon:
@@ -85,8 +104,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         think_logits = think_model(rollouts)
         think_logprobs = t.log_softmax(think_logits[full_batch_indices, :-1], dim=-1)
         action_logprobs = think_logprobs[full_batch_indices.unsqueeze(-1), think_indices, rollout_thoughts]
-        think_losses = -action_logprobs * normed_pred_rewards.unsqueeze(-1)
-        think_loss = think_losses.mean()
+        think_loss = (-action_logprobs * normed_pred_rewards.unsqueeze(-1)).mean()
 
         if b % 1 == 0:
             pred_loss.backward()
@@ -127,10 +145,10 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 preds = pred_logprobs.argmax(dim=-1).squeeze()
                 for row in range(rollouts.shape[0]):
                     print(f"{blue}{rollouts[row].tolist()} {magenta}{rollout_mean_logprob[row].item():.3f} : {cyan}{pred_rewards[row].item():.3f} {green}({normed_pred_rewards[row].item():.3f}) {gray}{preds[row].item()} ({pred_logprobs[row, preds[row]]:.3f}) {endc}")
-                #best_rollout_idx = pred_rewards.argmax().item()
-                #print(magenta, think_logprobs[best_rollout_idx].T, endc)
 
-                pred_acc = (pred_logprobs.argmax(dim=-1) == inp_toks.flatten()).float().mean().item()
+                #pred_acc = (pred_logprobs.argmax(dim=-1) == inp_toks.flatten()).float().mean().item()
+                logprob_correct, pred_acc = test_acc(answer_model, think_model, cfg, inp_max)
+
                 #t.save(answer_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_answer{b}.pth")
                 #t.save(think_model.state_dict(), f"saves/add_think_fixed_blind_super_clean_split_think{b}.pth")
 
@@ -173,10 +191,10 @@ if __name__ == "__main__":
 
     training_cfg = TrainingConfig(
         think_lr=1e-4,
-        answer_lr=3e-4,
+        answer_lr=1e-4,
         think_len=think_len,
         group_size=32,
-        batch_size=16,
+        batch_size=64,
         eps_decay=0.99995,
         eps_min=0.01,
         weight_decay=1e-9

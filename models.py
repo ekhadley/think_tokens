@@ -130,7 +130,7 @@ class GPT2Thinking(nn.Module):
         self.embed = nn.Embedding(cfg.d_vocab_total, cfg.d_model)
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_total, bias=False)
-        #self.eot = 50256
+        
         self.end_thought = cfg.d_vocab_total - 1
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
@@ -202,8 +202,6 @@ class GPT2SplitModel(nn.Module):
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab_out, bias=False)
 
-        self.eot = cfg.d_vocab_in - 1
-
     def forward(self, x: Tensor) -> Tensor:
         if x.ndim == 1: x = x.unsqueeze(0)
         x = self.embed(x) + self.pos_embed(t.arange(x.shape[1], device=x.device)).unsqueeze(0)
@@ -213,6 +211,14 @@ class GPT2SplitModel(nn.Module):
         x = self.unembed(x)
         return x
 
+    def forward_embeddings(self, embedding: Tensor) -> Tensor:
+        if embedding.ndim == 1: embedding = embedding.unsqueeze(0)
+        x = embedding + self.pos_embed(t.arange(embedding.shape[1], device=embedding.device)).unsqueeze(0)
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+        x = self.ln_f(x)
+        x = self.unembed(x)
+        return x
 
 @dataclass
 class RecycleModelConfig:
