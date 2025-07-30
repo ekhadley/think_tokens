@@ -17,8 +17,13 @@ def benchmark_acc(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg
         ans_toks = toks[:, seq_len].squeeze()
         for i_t in range(cfg.think_len):
             think_logits = think_model(rollouts)
+            #print(red, think_logits.shape, endc)
             think_toks = think_logits[:, -1].argmax(dim=-1, keepdim=True) + answer_model.cfg.d_vocab_out
+            #print(blue, think_toks.squeeze(), endc)
+            #print(blue, think_toks.shape, endc)
             rollouts = t.cat([rollouts, think_toks], dim=1)
+            #print(green, rollouts, endc)
+            #print(green, rollouts.shape, endc)
 
         rollout_thoughts = rollouts[:, -cfg.think_len:] - answer_model.cfg.d_vocab_out
         ans_logits = answer_model(rollout_thoughts)
@@ -63,7 +68,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             for seq_len in range(1, max_seq_len):
                 seqs: t.Tensor = batch['input_ids'][:, :seq_len]
                 seqs = seqs.unsqueeze(0).repeat(1, 1, group_size).reshape(full_batch_size, -1)
-                ans_toks = batch['input_ids'][batch_indices, seq_len - 1].reshape(-1, 1).repeat(1, group_size).flatten()
+                ans_toks = batch['input_ids'][batch_indices, seq_len].reshape(-1, 1).repeat(1, group_size).flatten()
 
                 rollouts_one_hot = t.nn.functional.one_hot(seqs, num_classes=d_normal_vocab + d_thought_vocab).float()
                 #print()
@@ -123,7 +128,7 @@ if __name__ == "__main__":
         seq_len=think_len,
         d_mlp=d_model*4,
         d_head=16,
-        n_heads=4,
+        n_heads=2,
         n_layers=1,
         d_vocab_in=d_thought_vocab,
         d_vocab_out=d_vocab,
@@ -133,8 +138,8 @@ if __name__ == "__main__":
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
-        d_head=32,
-        n_heads=8,
+        d_head=16,
+        n_heads=4,
         n_layers=4,
         d_vocab_in=d_vocab + d_thought_vocab,
         d_vocab_out=d_thought_vocab,
@@ -151,8 +156,6 @@ if __name__ == "__main__":
         think_len=think_len,
         group_size=16,
         batch_size=64,
-        eps_decay=0.999,
-        eps_min=0.01,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

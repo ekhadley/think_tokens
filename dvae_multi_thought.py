@@ -43,14 +43,11 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
         answer_logprobs = t.log_softmax(answer_logits[:, -1], dim=-1)
         losses = -answer_logprobs[full_batch_indices, inp_toks.squeeze()]
         loss = losses.mean()
-
         loss.backward()
-        ans_grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in answer_params]), 2.0).item()
-        think_grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in think_params]), 2.0).item()
-        opt.step()
-        opt.zero_grad()
         
         with t.inference_mode():
+            ans_grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in answer_params]), 2.0).item()
+            think_grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in think_params]), 2.0).item()
             wandb.log({
                 "pred_loss": loss.item(),
                 "acc": pred_acc,
@@ -68,6 +65,9 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                     preds = answer_logprobs.argmax(dim=-1).squeeze()
                     for row in range(rollouts.shape[0]):
                         print(f"{blue}{rollouts[row].tolist()} {magenta}{action_logprobs[row].item():.3f} : {cyan}{-losses[row].item():.3f} {gray}{preds[row].item()} ({answer_logprobs[row, preds[row]]:.3f}) {endc}")
+
+        opt.step()
+        opt.zero_grad()
 
 INP_MAX = 64
 if __name__ == "__main__":

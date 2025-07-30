@@ -43,8 +43,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                 seq_len = random.randint(1, max_seq_len)
                 seqs: t.Tensor = batch['input_ids'][:, :seq_len]
                 seqs = seqs.unsqueeze(0).repeat(1, 1, group_size).reshape(full_batch_size, -1) # repeat each seq in the batch group_size times
-                #ans_toks = batch['input_ids'][batch_indices, seq_len].reshape(-1, 1).repeat(1, group_size).flatten() # correct answer token for each sequence in the batch
-                ans_toks = batch['input_ids'][batch_indices, seq_len - 1].reshape(-1, 1).repeat(1, group_size).flatten()
+                ans_toks = batch['input_ids'][batch_indices, seq_len].reshape(-1, 1).repeat(1, group_size).flatten()
 
                 for i_t in range(cfg.think_len): # generate thinking tokens
                     think_logits = think_model(seqs)
