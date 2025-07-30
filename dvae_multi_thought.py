@@ -30,10 +30,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     for b in (tr:=tqdm.trange(int(steps), ncols=140)):
         inp_toks = t.randint(0, inp_max, (cfg.batch_size, 1), requires_grad=False).reshape(-1, 1).repeat(1, cfg.group_size).reshape(full_batch_size, 1)
 
-        inp_toks_one_hot = t.nn.functional.one_hot(inp_toks, num_classes=d_think_embed).float()
-        rollout_one_hot = inp_toks_one_hot
+        rollout_one_hot = t.nn.functional.one_hot(inp_toks, num_classes=d_think_embed).float()
         for i_t in range(cfg.think_len):
-            rollout_embed = (rollout_one_hot @ think_model.embed.weight)
             think_logits = think_model.forward_one_hot(rollout_one_hot)
             think_toks_one_hot = t.nn.functional.gumbel_softmax(think_logits[:, -1], hard=True, dim=-1)
             think_toks_padded = t.nn.functional.pad(think_toks_one_hot, (inp_max, 0), value=0.0)
@@ -76,7 +74,6 @@ if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
     t.manual_seed(42)
     random.seed(42)
-    t.autograd.set_detect_anomaly(True)
 
     d_model = 64
     d_thought = 8

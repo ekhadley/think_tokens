@@ -48,12 +48,12 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
 
                 for i_t in range(cfg.think_len): # generate thinking tokens
                     think_logits = think_model(seqs)
-                    #think_probs = t.softmax(think_logits[:, -1], dim=-1)
-                    #think_toks = t.multinomial(think_probs, num_samples=1) + d_normal_vocab # samples a continuation token for each sequence (each group element in each batch element for the whole batch). This gives us natural rollout variance
-                    if random.random() < epsilon:
-                        think_toks = t.randint(d_normal_vocab, d_normal_vocab+d_thought_vocab, (full_batch_size, 1))
-                    else:
-                        think_toks = think_logits[:, -1].argmax(dim=-1, keepdim=True) + d_normal_vocab
+                    think_probs = t.softmax(think_logits[:, -1], dim=-1)
+                    think_toks = t.multinomial(think_probs, num_samples=1) + d_normal_vocab # samples a continuation token for each sequence (each group element in each batch element for the whole batch). This gives us natural rollout variance
+                    #if random.random() < epsilon:
+                        #think_toks = t.randint(d_normal_vocab, d_normal_vocab+d_thought_vocab, (full_batch_size, 1))
+                    #else:
+                        #think_toks = think_logits[:, -1].argmax(dim=-1, keepdim=True) + d_normal_vocab
                     seqs = t.cat([seqs, think_toks], dim=1)
 
                 rollouts = seqs[:, -cfg.think_len:] - d_normal_vocab
@@ -75,7 +75,6 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
             pred_logprobs = t.log_softmax(pred_logits[:, -1], dim=-1) # real token logprob distn on the last thought token
             pred_reward = pred_logprobs[full_batch_indices, ans_toks].mean()
             pred_reward.backward()
-            exit()
             
             think_logits = think_model(seqs).squeeze()
             think_logprobs = t.log_softmax(think_logits[full_batch_indices, -cfg.think_len - 1:-1], dim=-1) # logprob distns for the positions where thinking tokens were emitted
@@ -126,6 +125,8 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
+    t.manual_seed(42)
+    random.seed(42)
 
     d_vocab = 64
     d_thought_vocab = 64

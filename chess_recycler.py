@@ -36,6 +36,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     wandb.init(project="gpt_chess", name="recycler_mutate", config=cfg)
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
     wandb.config.update(run_cfg)
+
     batch_size = cfg.batch_size
     seq_len = dataset['input_ids'].shape[1]
     d_model = model.cfg.d_model
