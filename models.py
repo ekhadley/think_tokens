@@ -211,8 +211,17 @@ class GPT2SplitModel(nn.Module):
         x = self.unembed(x)
         return x
 
-    def forward_embeddings(self, embedding: Tensor) -> Tensor:
+    def _forward_embeddings(self, embedding: Tensor) -> Tensor:
         if embedding.ndim == 1: embedding = embedding.unsqueeze(0)
+        x = embedding + self.pos_embed(t.arange(embedding.shape[1], device=embedding.device)).unsqueeze(0)
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+        x = self.ln_f(x)
+        x = self.unembed(x)
+        return x
+    def forward_one_hot(self, toks_one_hot: Tensor) -> Tensor:
+        assert toks_one_hot.ndim == 3, "Input should be (batch, seq_len, d_vocab_in)"
+        embedding = toks_one_hot @ self.embed.weight
         x = embedding + self.pos_embed(t.arange(embedding.shape[1], device=embedding.device)).unsqueeze(0)
         for i, block in enumerate(self.blocks):
             x = block(x)

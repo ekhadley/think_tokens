@@ -24,6 +24,44 @@ def test_acc(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Tra
     acc = (preds == inp_toks.squeeze()).float().mean()
     return logpbrobs_on_correct, acc
 
+def sweep(answer_model_cfg: SplitModelConfig, think_model_cfg: SplitModelConfig, train_func: callable, steps: int, count: int, sweep_project_name: str):
+    def run_training():
+        t.set_default_device(t.device("cuda"))
+        t.manual_seed(42)
+        random.seed(42)
+        wandb.init()
+        w_config = wandb.config
+
+        training_cfg = TrainingConfig(batch_size=w_config.batch_size,group_size=w_config.group_size,lr=w_config.lr,weight_decay=1e-9,think_len=1)
+
+        answer_model = GPT2SplitModel(answer_model_cfg)
+        think_model = GPT2SplitModel(think_model_cfg)
+        train_func(answer_model, think_model, training_cfg, steps=steps, display=False)
+
+    sweep_config = {
+        'method': 'bayes',
+        'metric': {
+            'name': 'acc',
+            'goal': 'maximize'
+        },
+        'parameters': {
+            'batch_size': {
+                'values': [32, 64, 128, 256]
+            },
+            'group_size': {
+                'values': [1, 16, 32, 64, 128]
+            },
+            'lr': {
+                'distribution': 'log_uniform_values',
+                'min': 1e-5,
+                'max': 1e-2
+            },
+        }
+    }
+
+    sweep_id = wandb.sweep(sweep_config, project=sweep_project_name)
+    wandb.agent(sweep_id, function=run_training, count=count)
+
 
 def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: TrainingConfig, steps: int = 1e9):
     answer_opt = t.optim.AdamW(answer_model.parameters(), lr=cfg.answer_lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
@@ -161,8 +199,8 @@ if __name__ == "__main__":
     random.seed(42)
 
     d_model = 64
-    d_thought = 64
-    think_len = 1
+    d_thought = 8
+    think_len = 2
     answer_model_cfg = SplitModelConfig(
         d_model=d_model,
         seq_len=think_len,
@@ -200,4 +238,5 @@ if __name__ == "__main__":
         weight_decay=1e-9
     )
 
-    train(answer_model, think_model, training_cfg, steps=1e9)
+    #train(answer_model, think_model, training_cfg, steps=1e9)
+    sweep(answer_model_cfg, think_model_cfg, train, steps=1e5, count=256, sweep_project_name="tae-sweep")
