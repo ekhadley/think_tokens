@@ -182,7 +182,6 @@ class SplitModelConfig:
     d_head: int = 64
     n_heads: int = 8
     n_layers: int = 6
-    d_vocab: int = 50257
     seq_len: int = 512
 
     d_vocab_in: int = 50257
