@@ -46,8 +46,10 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     answer_model.train()
     think_model.train()
 
+    seq_len = 22
+
     run_cfg = {"answer_model": answer_model.cfg.to_dict(), "think_model": think_model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="chess2", name="think", config=run_cfg)
+    wandb.init(project="chess2", name=f"think_single{seq_len}", config=run_cfg)
 
     pred_acc = 0.0
     ans_grad_norm, think_grad_norm = 0, 0
@@ -55,13 +57,6 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     max_seq_len = trainset['input_ids'].shape[1] - 1 - cfg.think_len
 
     d_normal_vocab, d_thought_vocab = answer_model.cfg.d_vocab_out, think_model.cfg.d_vocab_out
-
-    #group_size = cfg.group_size
-    #full_batch_size = group_size * cfg.batch_size
-    #batch_indices = t.arange(cfg.batch_size, requires_grad=False)
-    #full_batch_indices = t.arange(full_batch_size, requires_grad=False)
-
-    seq_len = 22
 
     dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
     for _ in range(epochs):
