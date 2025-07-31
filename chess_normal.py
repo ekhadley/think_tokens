@@ -29,6 +29,8 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
     seq_len = trainset['input_ids'].shape[-1]
     seq_indices = t.arange(seq_len - 1, requires_grad=False)
 
+    xd = 22
+
     for e in range(epochs):
         dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
         for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
@@ -37,7 +39,8 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
             logits = model(tokens)
             logprobs = t.log_softmax(logits[:, :-1], dim=-1)
             loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
-            #loss = -eindex.eindex(logprobs, tokens[:, 1:], "batch seq [batch seq]").mean()
+            #logprobs = t.log_softmax(logits[:, xd], dim=-1)
+            #loss = -logprobs[t.arange(batch_size), tokens[:, xd+1].squeeze()].mean()
 
             optimizer.zero_grad()
             loss.backward()
@@ -48,6 +51,8 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
 
             if i%32 == 0:
                 _, pred_acc = benchmark_acc_chess(model, testset)
+                #pred_acc = logprobs.argmax(dim=-1).eq(tokens[:, xd+1].squeeze()).float().mean().item()
+
                 #t.save(model.state_dict(), f"saves/normal{i}.pth")
 
 if __name__ == "__main__":

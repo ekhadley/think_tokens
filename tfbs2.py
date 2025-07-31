@@ -96,6 +96,20 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                     ans_grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in answer_params]), 2.0).item()
                     think_grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in think_params]), 2.0).item()
 
+                    num_samples = 16
+                    summary_len = 4
+                    rollout_toks = rollouts_one_hot.argmax(dim=-1)
+                    sample_indices = t.randint(full_batch_size, (num_samples,))
+                    rollouts_sample = rollout_toks[sample_indices, -summary_len-cfg.think_len:]
+                    ans_preds = ans_logprobs[sample_indices].argmax(dim=-1)
+                    print()
+                    for i, rollout in enumerate(rollouts_sample):
+                        summ, thoughts = rollout[:-cfg.think_len].tolist(), rollout[-cfg.think_len:].tolist()
+                        ans_pred = ans_preds[i].item()
+                        ans_pred_logprob = ans_logprobs[sample_indices[i], ans_pred].item()
+                        real_ans = ans_toks[sample_indices[i]].item()
+                        print(f"{magenta}{summ} {purple}{thoughts} {green}{ans_pred} [{ans_pred_logprob:.3f}] {lime}({real_ans}) {endc}")
+
                 wandb.log({
                     "loss": loss.item(),
                     "acc": pred_acc,
@@ -117,14 +131,14 @@ if __name__ == "__main__":
     d_model = 64
     d_vocab = 64
     d_thought_vocab = 64
-    think_len = 16
+    think_len = 4
     answer_model_cfg = SplitModelConfig(
         d_model=d_model,
         seq_len=think_len,
         d_mlp=d_model*4,
         d_head=16,
         n_heads=2,
-        n_layers=1,
+        n_layers=0,
         d_vocab_in=d_thought_vocab,
         d_vocab_out=d_vocab,
         d_thought_vocab=d_thought_vocab
