@@ -128,10 +128,10 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 512
+    d_model = 64
     d_vocab = 64
     d_thought_vocab = 64
-    think_len = 4
+    think_len = 8
     answer_model_cfg = SplitModelConfig(
         d_model=d_model,
         seq_len=think_len,
@@ -147,9 +147,9 @@ if __name__ == "__main__":
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
-        d_head=32,
-        n_heads=8,
-        n_layers=8,
+        d_head=16,
+        n_heads=4,
+        n_layers=4,
         d_vocab_in=d_vocab + d_thought_vocab,
         d_vocab_out=d_thought_vocab,
         d_thought_vocab=d_thought_vocab
