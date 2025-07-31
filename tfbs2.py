@@ -128,7 +128,7 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 64
+    d_model = 512
     d_vocab = 64
     d_thought_vocab = 64
     think_len = 4
@@ -147,9 +147,9 @@ if __name__ == "__main__":
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
-        d_head=16,
-        n_heads=4,
-        n_layers=4,
+        d_head=32,
+        n_heads=8,
+        n_layers=8,
         d_vocab_in=d_vocab + d_thought_vocab,
         d_vocab_out=d_thought_vocab,
         d_thought_vocab=d_thought_vocab
@@ -160,8 +160,7 @@ if __name__ == "__main__":
     #tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     training_cfg = TrainingConfig(
-        think_lr=3e-4,
-        answer_lr=3e-4,
+        lr=1e-3,
         think_len=think_len,
         batch_size=32,
         group_size=64,

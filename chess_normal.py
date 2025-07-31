@@ -69,19 +69,10 @@ if __name__ == "__main__":
         n_layers=4,
         d_vocab=64
     )
-    #model_cfg = ModelConfig(
-        #d_model=256,
-        #d_mlp=1024,
-        #d_head=64,
-        #n_heads=8,
-        #n_layers=8,
-        #d_vocab=64,
-        #seq_len=256
-    #)
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=3e-4,
+        lr=1e-3,
         weight_decay=1e-6,
         adam_beta1=0.9,
         adam_beta2=0.95
