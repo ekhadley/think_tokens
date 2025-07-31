@@ -157,7 +157,7 @@ if __name__ == "__main__":
     #tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
 
     training_cfg = TrainingConfig(
-        lr=1e-3,
+        lr=3e-4,
         think_len=think_len,
         batch_size=32,
         group_size=64,
