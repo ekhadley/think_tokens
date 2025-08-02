@@ -31,6 +31,11 @@
             - In practice this only gives us the smallest boost in accuracy over random chance. It seems there are few tendencies strong enough to get canonized.
         - What is needed here is some spontaneous symmetry breaking. If either model just draws out of a hat and picks some random association and sticks to it, the hill is exceedingly easy for the other model to follow.
             - So how do we escape the noise regime?
+    
+    - tokenized AE success!
+        - The bottleneck across the channel seems to just be more than RL can handle.
+        - If we sample from the think logits with gradients on using the gumbel softmax trick, then it works
+            - It can learn 1-1 mappings, or multi-token mappings and goes to >.9 acc swiftly.
 
 - naming conventions:
     - *add*: training a model for the toy task of modular addition

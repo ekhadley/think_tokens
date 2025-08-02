@@ -37,10 +37,10 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
             tokens = batch['input_ids']
             batch_size = tokens.shape[0]
             logits = model(tokens)
-            logprobs = t.log_softmax(logits[:, :-1], dim=-1)
-            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
-            #logprobs = t.log_softmax(logits[:, xd], dim=-1)
-            #loss = -logprobs[t.arange(batch_size), tokens[:, xd+1].squeeze()].mean()
+            #logprobs = t.log_softmax(logits[:, :-1], dim=-1)
+            #loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
+            logprobs = t.log_softmax(logits[:, xd-1], dim=-1)
+            loss = -logprobs[t.arange(batch_size), tokens[:, xd].squeeze()].mean()
 
             optimizer.zero_grad()
             loss.backward()
@@ -50,8 +50,8 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
             tr.set_description(f"{magenta}loss: {loss.item():.3f}, acc: {pred_acc:.3f}")
 
             if i%32 == 0:
-                _, pred_acc = benchmark_acc_chess(model, testset)
-                #pred_acc = logprobs.argmax(dim=-1).eq(tokens[:, xd+1].squeeze()).float().mean().item()
+                #_, pred_acc = benchmark_acc_chess(model, testset)
+                pred_acc = logprobs.argmax(dim=-1).eq(tokens[:, xd].squeeze()).float().mean().item()
 
                 #t.save(model.state_dict(), f"saves/normal{i}.pth")
 
@@ -82,4 +82,4 @@ if __name__ == "__main__":
     dataset.set_format(type='torch')
     trainset, testset = dataset.train_test_split(test_size=0.005).values()
     
-    train(model, training_cfg, trainset, testset, epochs=5)
+    train(model, training_cfg, trainset, testset, epochs=10)
