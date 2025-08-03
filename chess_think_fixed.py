@@ -91,7 +91,7 @@ def train(model: GPT2Thinking, cfg: TrainingConfig, trainset: datasets.Dataset, 
                     ans_preds = ans_logprobs[sample_indices].argmax(dim=-1)
                     print()
                     for i, rollout in enumerate(rollouts_sample):
-                        summ, thoughts = rollout[:summary_len].tolist(), rollout[cfg.think_len:].tolist() if cfg.think_len > 0 else []
+                        summ, thoughts = rollout[:summary_len].tolist(), rollout[-cfg.think_len:].tolist() if cfg.think_len > 0 else []
                         ans_pred = ans_preds[i].item()
                         ans_pred_logprob = ans_logprobs[sample_indices[i], ans_pred].item()
                         real_ans = ans_toks[sample_indices[i]].item()
@@ -122,27 +122,25 @@ if __name__ == "__main__":
     d_model = 64
     d_vocab = 64
     d_thought_vocab = 64
-    think_len = 1
-    for group_size in [1, 16, 64]:
-        for think_len in [1, 8, 64]:
-            think_model_cfg = ThinkingModelConfig(
-                d_model=d_model,
-                seq_len=256,
-                d_mlp=d_model*4,
-                d_head=16,
-                n_heads=4,
-                n_layers=4,
-                d_normal_vocab=d_vocab,
-                d_thought_vocab=d_thought_vocab
-            )
+    think_len = 32
+    think_model_cfg = ThinkingModelConfig(
+        d_model=d_model,
+        seq_len=256,
+        d_mlp=d_model*4,
+        d_head=16,
+        n_heads=4,
+        n_layers=4,
+        d_normal_vocab=d_vocab,
+        d_thought_vocab=d_thought_vocab
+    )
 
-            model = GPT2Thinking(think_model_cfg)
+    model = GPT2Thinking(think_model_cfg)
 
-            training_cfg = TrainingConfig(
-                lr=1e-3,
-                think_len=think_len,
-                batch_size=64,
-                group_size=group_size,
-            )
+    training_cfg = TrainingConfig(
+        lr=1e-3,
+        think_len=think_len,
+        batch_size=32,
+        group_size=8,
+    )
 
-            train(model, training_cfg, trainset, testset, epochs=5)
+    train(model, training_cfg, trainset, testset, epochs=5)
