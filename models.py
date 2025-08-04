@@ -284,8 +284,6 @@ class Recycler(nn.Module):
         x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0) # Add positional embeddings
         for i, block in enumerate(self.blocks):
             x = block(x)
-            if seq_len >= 10 and seq_len < 16 and i ==3:
-                imshow(x[0], title=f"seq_len {seq_len}, layer {i}")
             if i == self.cfg.recycle_layer:
                 new_context = x[:, -1, :]  # Store the context vector from the specified layer
                 if not need_distn: return new_context # if we don't need the distribution, return the context vector immediately
@@ -388,8 +386,6 @@ class ContThinkingModel(nn.Module):
         x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0) # Add positional embeddings
         for i, block in enumerate(self.blocks):
             x = block(x)
-            if seq_len >= 10 and seq_len < 16 and i ==3:
-                imshow(x[0], title=f"seq_len {seq_len}, layer {i}")
             if i == self.cfg.recycle_layer:
                 new_context = x[:, -1, :]  # Store the context vector from the specified layer
                 if not need_distn: return new_context # if we don't need the distribution, return the context vector immediately

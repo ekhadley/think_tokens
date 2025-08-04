@@ -20,7 +20,7 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
     model.train()
 
-    wandb.init(project="chess2", name="normal", config=cfg)
+    wandb.init(project="gpt_chess", name="normal", config=cfg)
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
     wandb.config.update(run_cfg)
 
@@ -37,10 +37,10 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
             tokens = batch['input_ids']
             batch_size = tokens.shape[0]
             logits = model(tokens)
-            #logprobs = t.log_softmax(logits[:, :-1], dim=-1)
-            #loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
-            logprobs = t.log_softmax(logits[:, xd-1], dim=-1)
-            loss = -logprobs[t.arange(batch_size), tokens[:, xd].squeeze()].mean()
+            logprobs = t.log_softmax(logits[:, :-1], dim=-1)
+            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
+            #logprobs = t.log_softmax(logits[:, xd-1], dim=-1)
+            #loss = -logprobs[t.arange(batch_size), tokens[:, xd].squeeze()].mean()
 
             optimizer.zero_grad()
             loss.backward()
@@ -50,8 +50,8 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
             tr.set_description(f"{magenta}loss: {loss.item():.3f}, acc: {pred_acc:.3f}")
 
             if i%32 == 0:
-                #_, pred_acc = benchmark_acc_chess(model, testset)
-                pred_acc = logprobs.argmax(dim=-1).eq(tokens[:, xd].squeeze()).float().mean().item()
+                _, pred_acc = benchmark_acc_chess(model, testset)
+                #pred_acc = logprobs.argmax(dim=-1).eq(tokens[:, xd].squeeze()).float().mean().item()
 
                 #t.save(model.state_dict(), f"saves/normal{i}.pth")
 
@@ -60,22 +60,21 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
+    d_model = 64
     model_cfg = ModelConfig(
-        d_model=64,
+        d_model=d_model,
         seq_len=256,
-        d_mlp=256,
-        d_head=16,
+        d_mlp=d_model*4,
+        d_head=d_model,
         n_heads=4,
         n_layers=4,
         d_vocab=64
     )
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
-        batch_size=64,
         lr=1e-3,
+        batch_size=64,
         weight_decay=1e-6,
-        adam_beta1=0.9,
-        adam_beta2=0.95
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

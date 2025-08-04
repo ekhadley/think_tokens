@@ -33,9 +33,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
     model.train()
 
-    wandb.init(project="gpt_chess", name="recycler_mutate", config=cfg)
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.config.update(run_cfg)
+    wandb.init(project="gpt_chess", name="recycler", config=run_cfg)
 
     batch_size = cfg.batch_size
     seq_len = dataset['input_ids'].shape[1]
@@ -43,7 +42,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     d_vocab = model.cfg.d_vocab
 
     parameters = [p for p in model.parameters() if p.requires_grad]
-    grad_norm = 42069
+    grad_norm = 0
 
 
     dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
@@ -53,14 +52,14 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             tokens = batch['input_ids']
             batch_size, seq_len = tokens.shape
             
-            #ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
-            ctx = None
+            ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
+            #ctx = None
             logits = t.zeros((batch_size, seq_len, d_vocab)) # preaallocate context instead of cating
             for s in range(seq_len):
                 toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-                #new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
-                #ctx[:, s, :] = new_ctx # update the context with the new context vector
-                ctx, new_logits = model.forward2(toks, ctx)
+                new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
+                ctx[:, s, :] = new_ctx # update the context with the new context vector
+                #ctx, new_logits = model.forward2(toks, ctx)
                 
                 logits[:, s, :] = new_logits
             logprobs = t.log_softmax(logits, dim=-1)
@@ -86,23 +85,23 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 128
+    d_model = 64
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=128,
         d_mlp=d_model*4,
-        d_head=d_model//2,
-        n_heads=8,
-        n_layers=6,
+        d_head=16,
+        n_heads=4,
+        n_layers=4,
         d_vocab=64,
-        recycle_layer=4
+        recycle_layer=3
     )
     model = Recycler(model_cfg)
 
     training_cfg = TrainingConfig(
-        batch_size=32,
-        lr=1e-4,
-        weight_decay=1e-9,
+        batch_size=64,
+        lr=1e-3,
+        weight_decay=1e-6,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

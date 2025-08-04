@@ -49,7 +49,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
     seq_len = 22
 
     run_cfg = {"answer_model": answer_model.cfg.to_dict(), "think_model": think_model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="chess2", name=f"think_single{seq_len}", config=run_cfg)
+    wandb.init(project="chess2", name=f"blind_single{seq_len}", config=run_cfg)
 
     pred_acc = 0.0
     ans_grad_norm, think_grad_norm = 0, 0
@@ -99,7 +99,7 @@ def train(answer_model: GPT2SplitModel, think_model: GPT2SplitModel, cfg: Traini
                     ans_preds = ans_logprobs[sample_indices].argmax(dim=-1)
                     print()
                     for i, rollout in enumerate(rollouts_sample):
-                        summ, thoughts = rollout[:-cfg.think_len].tolist(), rollout[-cfg.think_len:].tolist()
+                        summ, thoughts = rollout[:summary_len].tolist(), rollout[-cfg.think_len:].tolist() if cfg.think_len > 0 else []
                         ans_pred = ans_preds[i].item()
                         ans_pred_logprob = ans_logprobs[sample_indices[i], ans_pred].item()
                         real_ans = ans_toks[sample_indices[i]].item()
@@ -125,15 +125,15 @@ if __name__ == "__main__":
 
     d_model = 64
     d_vocab = 64
-    d_thought_vocab = 64
-    think_len = 8
+    d_thought_vocab = 512
+    think_len = 16
     answer_model_cfg = SplitModelConfig(
         d_model=d_model,
         seq_len=think_len,
         d_mlp=d_model*4,
         d_head=16,
-        n_heads=2,
-        n_layers=0,
+        n_heads=4,
+        n_layers=1,
         d_vocab_in=d_thought_vocab,
         d_vocab_out=d_vocab,
         d_thought_vocab=d_thought_vocab
@@ -157,8 +157,8 @@ if __name__ == "__main__":
     training_cfg = TrainingConfig(
         lr=1e-3,
         think_len=think_len,
-        batch_size=32,
-        group_size=64,
+        batch_size=64,
+        group_size=16,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

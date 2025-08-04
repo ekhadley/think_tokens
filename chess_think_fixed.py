@@ -121,8 +121,8 @@ if __name__ == "__main__":
 
     d_model = 64
     d_vocab = 64
-    d_thought_vocab = 64
-    think_len = 32
+    d_thought_vocab = 512
+    think_len = 14
     think_model_cfg = ThinkingModelConfig(
         d_model=d_model,
         seq_len=256,
@@ -139,8 +139,8 @@ if __name__ == "__main__":
     training_cfg = TrainingConfig(
         lr=1e-3,
         think_len=think_len,
-        batch_size=32,
-        group_size=8,
+        batch_size=64,
+        group_size=16,
     )
 
     train(model, training_cfg, trainset, testset, epochs=5)
