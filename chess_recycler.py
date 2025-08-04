@@ -55,37 +55,29 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             ctx = t.zeros((batch_size, seq_len, d_model))
             #ctx = None
             logits = t.zeros((batch_size, seq_len, d_vocab))
-            #for s in range(seq_len):
-            for s in range(22):
+            for s in range(seq_len):
                 toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
                 new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
+                #new_ctx, new_logits = model.forward3(tokens[:, :s+1], ctx[:, :s] if s != 0 else None)
+                #new_ctx, new_logits = model.forward3(tokens[:, :s+1], None)
                 ctx[:, s, :] = new_ctx # update the context with the new context vector
                 #ctx, new_logits = model.forward2(toks, ctx)
-                
                 logits[:, s, :] = new_logits
-            #logprobs = t.log_softmax(logits, dim=-1)
-            #loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
+            logprobs = t.log_softmax(logits, dim=-1)
 
-            logprobs = t.log_softmax(new_logits, dim=-1)
-            loss = -logprobs[t.arange(batch_size), tokens[:, 22]].mean()
-            #logprobs = t.log_softmax(logits, dim=-1)[:, 21]
-            #loss = -logprobs[t.arange(batch_size), tokens[:, 22]].mean()
-
+            loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
             loss.backward()
-            print(loss.grad)
 
-
-            t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            if i % 32 == 0:
+                grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
+                accuracy, _ = test_accuracy_recycler(model, testset)
+                #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
+            
             optimizer.step()    
-            grad_norm = t.norm(t.stack([t.norm(p.grad.detach(), 2.0) for p in parameters]), 2.0).item()
             optimizer.zero_grad()
 
             wandb.log({"loss": loss.item(), "acc": accuracy, "grad_norm": grad_norm})
             tr.set_description(f"{magenta}loss: {loss.item():.3f}, acc: {accuracy:.3f}, grad_norm: {grad_norm:.3f}")
-
-            if i % 1024 == 0:
-                accuracy, _ = test_accuracy_recycler(model, testset)
-                #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
 
 
 if __name__ == "__main__":
@@ -98,7 +90,6 @@ if __name__ == "__main__":
         d_model=d_model,
         seq_len=128,
         d_mlp=d_model*4,
-        d_head=16,
         n_heads=4,
         n_layers=4,
         d_vocab=64,

@@ -78,7 +78,6 @@ if __name__ == "__main__":
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
-        d_head=d_model//2,
         n_heads=8,
         n_layers=6,
         d_normal_vocab=64,

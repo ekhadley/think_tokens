@@ -130,8 +130,8 @@ if __name__ == "__main__":
     d_vocab = 64
     d_thought_vocab = 64
     think_len = 16
-    answer_model_cfg = SplitModelConfig(d_model=64, seq_len=think_len, d_mlp=256, d_head=32, n_heads=4, n_layers=2, d_vocab_in=d_thought_vocab, d_vocab_out=d_vocab, d_thought_vocab=d_thought_vocab)
-    think_model_cfg =  SplitModelConfig(d_model=64, seq_len=256,       d_mlp=256, d_head=32, n_heads=8, n_layers=6, d_vocab_in=d_vocab + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
+    answer_model_cfg = SplitModelConfig(d_model=64, seq_len=think_len, d_mlp=256, n_heads=4, n_layers=2, d_vocab_in=d_thought_vocab, d_vocab_out=d_vocab, d_thought_vocab=d_thought_vocab)
+    think_model_cfg =  SplitModelConfig(d_model=64, seq_len=256,       d_mlp=256, n_heads=8, n_layers=6, d_vocab_in=d_vocab + d_thought_vocab, d_vocab_out=d_thought_vocab, d_thought_vocab=d_thought_vocab)
 
     answer_model = GPT2SplitModel(answer_model_cfg)
     think_model = GPT2SplitModel(think_model_cfg)

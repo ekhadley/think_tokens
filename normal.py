@@ -49,7 +49,7 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=64)
+    model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, n_heads=8, n_layers=8, d_vocab=64)
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
