@@ -7,19 +7,81 @@ import datasets
 from utils import *
 from models import Recycler, RecycleModelConfig, TrainingConfig
 
+# Takes vector of next tokens for the batch and produces single context output vector.
 @t.inference_mode()
-def test_accuracy_recycler(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+def test_accuracy_recycler1(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
     tokens = dataset['input_ids']
     batch_size, seq_len = tokens.shape
     
-    #ctx = t.zeros((batch_size, seq_len, d_model)) # preaallocate context instead of cating
-    ctx = None
-    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab)) # preaallocate context instead of cating
+    ctx = t.zeros((batch_size, seq_len, d_model))
+    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab))
     for s in range(seq_len):
         toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-        #new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None) # process the next token with the current context
-        ctx, new_logits = model.forward2(toks, ctx) # process the next token with the current context
+        new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
         logits[:, s, :] = new_logits
+        ctx[:, s, :] = new_ctx
+    logprobs = t.log_softmax(logits, dim=-1)
+    logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
+
+    top_moves = logits.argmax(dim=-1)
+    correct = (top_moves[:, :-1] == tokens[:, 1:]).float().mean().item()
+    return correct, logprob_correct
+
+# changes and returns the whole hidden state on each forward pass.
+@t.inference_mode()
+def test_accuracy_recycler2(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+    tokens = dataset['input_ids']
+    batch_size, seq_len = tokens.shape
+    
+    ctx = None
+    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab))
+    for s in range(seq_len):
+        toks = tokens[:, s].reshape(-1, 1)
+        ctx, new_logits = model.forward2(toks, ctx)
+        logits[:, s, :] = new_logits
+    logprobs = t.log_softmax(logits, dim=-1)
+    logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
+
+    top_moves = logits.argmax(dim=-1)
+    correct = (top_moves[:, :-1] == tokens[:, 1:]).float().mean().item()
+    return correct, logprob_correct
+
+# takes all prev and current tokens of each seq in the batch as input. Returns a single new context vector like forward1.
+@t.inference_mode()
+def test_accuracy_recycler3(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+    tokens = dataset['input_ids']
+    batch_size, seq_len = tokens.shape
+    
+    ctx = t.zeros((batch_size, seq_len, d_model))
+    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab))
+    for s in range(seq_len):
+        toks = tokens[:, :s+1]
+        new_ctx, new_logits = model.forward3(toks, ctx[:, :s] if s != 0 else None)
+        logits[:, s, :] = new_logits
+        ctx[:, s, :] = new_ctx
+    logprobs = t.log_softmax(logits, dim=-1)
+    logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
+
+    top_moves = logits.argmax(dim=-1)
+    correct = (top_moves[:, :-1] == tokens[:, 1:]).float().mean().item()
+    return correct, logprob_correct
+
+@t.inference_mode()
+def test_accuracy_recycler4(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+    tokens = dataset['input_ids']
+    batch_size, seq_len = tokens.shape
+    
+    ctx = t.zeros((batch_size, 2*seq_len, d_model))
+    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab))
+    for s in range(seq_len):
+        toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
+        new_ctx, new_logits = model.forward4(toks, ctx[:, :s*2] if s != 0 else None)
+        logits[:, s, :] = new_logits
+        
+        tok_embeds = model.embed(toks).reshape(batch_size, d_model)
+        ctx[:, s*2, :] = tok_embeds # put the normal token embedding into the context
+        ctx[:, s*2+1, :] = new_ctx # update the context with the new context vector
+    
     logprobs = t.log_softmax(logits, dim=-1)
     logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
 
@@ -52,25 +114,36 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             tokens = batch['input_ids']
             batch_size, seq_len = tokens.shape
             
-            ctx = t.zeros((batch_size, seq_len, d_model))
-            #ctx = None
+            #ctx = t.zeros((batch_size, seq_len, d_model))
+            ##ctx = None
+            #logits = t.zeros((batch_size, seq_len, d_vocab))
+            #for s in range(seq_len):
+                #toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
+                ##new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
+                #new_ctx, new_logits = model.forward3(tokens[:, :s+1], ctx[:, :s] if s != 0 else None)
+                ##print(new_ctx)
+                #ctx[:, s, :] = new_ctx # update the context with the new context vector
+                ##ctx, new_logits = model.forward2(toks, ctx)
+                #logits[:, s, :] = new_logits
+
+            ctx = t.zeros((batch_size, 2*seq_len, d_model))
             logits = t.zeros((batch_size, seq_len, d_vocab))
             for s in range(seq_len):
                 toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-                new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
-                #new_ctx, new_logits = model.forward3(tokens[:, :s+1], ctx[:, :s] if s != 0 else None)
-                #new_ctx, new_logits = model.forward3(tokens[:, :s+1], None)
-                ctx[:, s, :] = new_ctx # update the context with the new context vector
-                #ctx, new_logits = model.forward2(toks, ctx)
+                new_ctx, new_logits = model.forward4(toks, ctx[:, :s*2] if s != 0 else None)
                 logits[:, s, :] = new_logits
+                
+                tok_embeds = model.embed(toks).reshape(batch_size, d_model)
+                ctx[:, s*2, :] = tok_embeds # put the normal token embedding into the context
+                ctx[:, s*2+1, :] = new_ctx # update the context with the new context vector
+            
             logprobs = t.log_softmax(logits, dim=-1)
-
             loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
             loss.backward()
+            grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
             if i % 32 == 0:
-                grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
-                accuracy, _ = test_accuracy_recycler(model, testset)
+                accuracy, _ = test_accuracy_recycler4(model, testset)
                 #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
             
             optimizer.step()    
@@ -88,7 +161,7 @@ if __name__ == "__main__":
     d_model = 64
     model_cfg = RecycleModelConfig(
         d_model=d_model,
-        seq_len=128,
+        seq_len=256,
         d_mlp=d_model*4,
         n_heads=4,
         n_layers=4,
@@ -100,7 +173,7 @@ if __name__ == "__main__":
     training_cfg = TrainingConfig(
         batch_size=64,
         lr=1e-3,
-        weight_decay=1e-6,
+        weight_decay=1e-9,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

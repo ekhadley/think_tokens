@@ -30,7 +30,7 @@ underline = '\033[4m'
 endc = '\033[0m'
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
-t.set_printoptions(sci_mode=False, linewidth=400, edgeitems=5)
+t.set_printoptions(sci_mode=False, linewidth=200, edgeitems=4)
 
 class SimpleTokenizer:
     def __init__(self, max_int):
@@ -336,9 +336,3 @@ def tokenize_chess_games(chess_df):
     print(f"Failed to tokenize {failed_games} games")
     
     return tokenized_games
-
-if __name__ == "__main__":
-    import tqdm, json, pickle
-
-    # Load the chess dataset (LAN format)
-    chess = pd.read_csv("./datasets/gm_games.csv")

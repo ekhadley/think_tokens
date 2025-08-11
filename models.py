@@ -38,7 +38,6 @@ class ModelConfig:
     d_model: int = 512
     seq_len: int = 512
     d_mlp: int = 2048
-    d_head: int = 64
     n_heads: int = 8
     n_layers: int = 6
     d_vocab: int = 50257
@@ -107,7 +106,6 @@ class ThinkingModelConfig:
     d_model: int = 512
     seq_len: int = 512
     d_mlp: int = 2048
-    d_head: int = 64
     n_heads: int = 8
     n_layers: int = 8
     d_normal_vocab: int = 50257
@@ -188,7 +186,6 @@ class SplitModelConfig:
     d_model: int = 512
     seq_len: int = 512
     d_mlp: int = 2048
-    d_head: int = 64
     n_heads: int = 8
     n_layers: int = 6
     seq_len: int = 512
@@ -234,7 +231,7 @@ class RecycleModelConfig:
     d_model: int = 512
     seq_len: int = 512
     d_mlp: int = 2048
-    n_heads: int = 8
+    n_heads: int = 4
     n_layers: int = 6
     d_vocab: int = 50257
     seq_len: int = 512
@@ -291,6 +288,7 @@ class Recycler(nn.Module):
         distn = self.unembed(x) # unembed the last position residual stream to get next token distn
         return new_context, distn
 
+    # fully recurrent version. Instead of returning a single context vector for each forward pass, it returns an entirely different hidden state
     def forward2(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token.ndim == 1: token = token.unsqueeze(0)
@@ -315,6 +313,7 @@ class Recycler(nn.Module):
         distn = self.unembed(x[:, -1, :])
         return x, distn
 
+    # like forward1 but uses an attention layer like a gate, selectively crossing over the recycled context and the normal token embeddings.
     def forward3(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)
         assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
@@ -322,29 +321,19 @@ class Recycler(nn.Module):
         token_seq_len = tokens.shape[1]
         token_embeds = self.embed(tokens)  # (batch, token_seq_len, d_model)
         token_embeds += self.pos_embed(t.arange(token_seq_len)).unsqueeze(0)  # Add positional embeddings to the token embeddings
-        #print(green, token_embeds.shape, token_embeds.max(), endc)
 
-        if False and context is not None:
+        if context is not None:
             if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
             assert context.ndim == 3, "Context should be (batch, seq, d_model)"
             context_seq_len = context.shape[1]
             total_seq_len = context_seq_len + token_seq_len
-            # Concatenate context with token embeddings
             combined = t.cat([context, token_embeds], dim=1)  # (batch, total_seq_len, d_model)
-            attn_mask = t.full((total_seq_len, total_seq_len), True, dtype=t.bool)
-            toks_attn_mask = t.tril(t.full((token_seq_len, token_seq_len), True, dtype=t.bool))
-            attn_mask[context_seq_len:, context_seq_len:] = toks_attn_mask
-            attn_mask[:context_seq_len] = 0
-
-            mixed_embeds, _ = self.mixing_attn.forward(combined, combined, combined, attn_mask=attn_mask)
-            print(blue, mixed_embeds, endc)
-
-            # Slice to just the token positions
+            attn_mask = t.triu(t.full((total_seq_len, total_seq_len), 1, dtype=t.bool), diagonal=1)
+            mixed_embeds, _ = self.mixing_attn(combined, combined, combined, attn_mask=attn_mask, is_causal=True)
             x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
         else:
             x = token_embeds
         
-        # Run through the transformer blocks
         for i, block in enumerate(self.blocks):
             x = block(x)
             if i == self.cfg.recycle_layer:
@@ -352,14 +341,42 @@ class Recycler(nn.Module):
                 if not need_distn: 
                     return new_context
         
-        # Process final layer norm and get distribution
         x = self.ln_f(x[:, -1, :])  # Only process the last position
         distn = self.unembed(x)  # Get next token distribution
         return new_context, distn
 
-    # forward pass for a single string of tokens.
-    # Has to sequentially process  each token to accumulate hidden state context.
-    # Returns full context for the sequence.
+    # like above but simpler.
+    # the input context is simply the embedding for token 0, recycled vector for token 0, embedding for token 1, recycled vector for token 1, etc.
+    # each sequence position is now two sequence positions. 
+    def forward4(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        assert token is not None or context is not None, "Either a first token or an context state must be provided"
+        if token.ndim == 1: token = token.unsqueeze(0)
+        assert token.ndim == 2, "Token should be single item or 1D tensor"
+
+        token_embed = self.embed(token) if token is not None else None
+        if context is not None:
+            if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
+            assert context.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
+
+        if context is not None and token_embed is not None:
+            x = t.cat([context, token_embed], dim=1)  # Concatenate context with the new token embedding
+        elif context is None:
+            x = token_embed
+        else:
+            x = context
+
+        seq_len = x.shape[1]
+
+        x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0) # Add positional embeddings
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            if i == self.cfg.recycle_layer:
+                new_context = x[:, -1, :]  # Store the context vector from the specified layer
+                if not need_distn: return new_context # if we don't need the distribution, return the context vector immediately
+        x = self.ln_f(x[:, -1, :]) # Toss unecessary context.
+        distn = self.unembed(x) # unembed the last position residual stream to get next token distn
+        return new_context, distn
+    
     def process_seq(self, tokens: Tensor) -> Tensor:
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)  # Ensure tokens is 2D
         bsize = tokens.shape[0]
