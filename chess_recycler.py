@@ -113,14 +113,14 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
         for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
             tokens = batch['input_ids']
             batch_size, seq_len = tokens.shape
-            
+
             #ctx = t.zeros((batch_size, seq_len, d_model))
             ##ctx = None
             #logits = t.zeros((batch_size, seq_len, d_vocab))
             #for s in range(seq_len):
                 #toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-                ##new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
-                #new_ctx, new_logits = model.forward3(tokens[:, :s+1], ctx[:, :s] if s != 0 else None)
+                #new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
+                ##new_ctx, new_logits = model.forward3(tokens[:, :s+1], ctx[:, :s] if s != 0 else None)
                 ##print(new_ctx)
                 #ctx[:, s, :] = new_ctx # update the context with the new context vector
                 ##ctx, new_logits = model.forward2(toks, ctx)
@@ -165,8 +165,8 @@ if __name__ == "__main__":
         d_mlp=d_model*4,
         n_heads=4,
         n_layers=4,
+        recycle_layer=3,
         d_vocab=64,
-        recycle_layer=3
     )
     model = Recycler(model_cfg)
 
