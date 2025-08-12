@@ -103,9 +103,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     d_model = model.cfg.d_model
     d_vocab = model.cfg.d_vocab
 
-    parameters = [p for p in model.parameters() if p.requires_grad]
+    seq_indices = t.arange(seq_len - 1, requires_grad=False)
     grad_norm = 0
-
 
     dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
     accuracy = 0.0
@@ -138,7 +137,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                 ctx[:, s*2+1, :] = new_ctx # update the context with the new context vector
             
             logprobs = t.log_softmax(logits, dim=-1)
-            loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
+            #loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
+            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
             loss.backward()
             grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
@@ -158,13 +158,13 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 64
+    d_model = 32
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
         n_heads=4,
-        n_layers=4,
+        n_layers=6,
         recycle_layer=3,
         d_vocab=64,
     )
