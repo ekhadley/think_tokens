@@ -256,6 +256,7 @@ class Recycler(nn.Module):
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
         self.mixing_attn = nn.MultiheadAttention(cfg.d_model, 1, batch_first=True)
+        self.recycler_block = TransformerBlock(cfg)
         
     # forward passes like an rnn. Takes a continuous 2d context of previous text and a single new token, outputs the new context vector and a distn for next token prediction
     # the context vector is one of the later layer hidden states (residual stream vectors) for the last token position. Context is combined by simple concatenation.
@@ -385,7 +386,74 @@ class Recycler(nn.Module):
         x = self.ln_f(x[:, -1, :]) # Toss unecessary context.
         distn = self.unembed(x) # unembed the last position residual stream to get next token distn
         return new_context, distn
+
+    def forward5(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        if tokens.ndim == 1: tokens = tokens.unsqueeze(0)
+        assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
+
+        token_seq_len = tokens.shape[1]
+        token_embeds = self.embed(tokens)  # (batch, token_seq_len, d_model)
+        token_embeds = token_embeds + self.pos_embed(t.arange(token_seq_len, device=token_embeds.device)).unsqueeze(0)
+
+        if context is not None:
+            if context.ndim == 2: context = context.unsqueeze(0)
+            assert context.ndim == 3, "Context should be (batch, seq, d_model)"
+            context_seq_len = context.shape[1]
+            combined = t.cat([context, token_embeds], dim=1)  # (batch, total_seq_len, d_model)
+            total_seq_len = combined.shape[1]
+            attn_mask = t.triu(t.ones((total_seq_len, total_seq_len), device=combined.device, dtype=t.bool), diagonal=1)
+            mixed_embeds, _ = self.mixing_attn(combined, combined, combined, is_causal=True, attn_mask=attn_mask)
+            x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
+        else:
+            x = token_embeds
+
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            if i == self.cfg.recycle_layer - 1:
+                recycler_stream = self.recycler_block(x)
+                new_context = recycler_stream[:, -1, :]  # Use the separate recycler block's residual stream
+                if not need_distn:
+                    return new_context
+
+        x = self.ln_f(x[:, -1, :])  # Only process the last position for logits
+        distn = self.unembed(x)
+        return new_context, distn
     
+    def forward6(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        assert token is not None or context is not None, "Either a first token or an context state must be provided"
+        if token is not None and token.ndim == 1: token = token.unsqueeze(0)
+        if token is not None: assert token.ndim == 2, "Token should be single item or 1D tensor"
+
+        token_embed = self.embed(token) if token is not None else None
+
+        if context is not None and token_embed is not None:
+            x = t.cat([context, token_embed], dim=1)
+        elif context is None:
+            x = token_embed
+        elif token_embed is None:
+            if context.ndim == 2: context = context.unsqueeze(0)
+            assert context.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
+            x = context
+        else:
+            raise ValueError("Either token or context must be provided")
+
+        seq_len = x.shape[1]
+        tok_embed_indices = t.tensor([i for i in range(0, seq_len, 2)], device=x.device)
+        pos = self.pos_embed(tok_embed_indices).unsqueeze(0)
+        x[:, tok_embed_indices, :] = x[:, tok_embed_indices, :] + pos
+
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            if i == self.cfg.recycle_layer - 1:
+                recycler_stream = self.recycler_block(x)
+                new_context = recycler_stream[:, -1, :]
+                if not need_distn:
+                    return new_context
+
+        x = self.ln_f(x[:, -1, :])
+        distn = self.unembed(x)
+        return new_context, distn
+
     def process_seq(self, tokens: Tensor) -> Tensor:
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)  # Ensure tokens is 2D
         bsize = tokens.shape[0]
