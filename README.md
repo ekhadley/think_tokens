@@ -1,13 +1,41 @@
-- stuff:
-    - hyperparameter success: the thinking models can mostly match the addition sizes of the normal model.
-    - hyperparameter difficulties
-        - larger additions become possible with a wider model, not a longer one
-        - training runs are not very deterministic: based on the weight init, some runs succeed while others fail.
-    - Maybe addition is a bad toy task? it isnt that fundamentally serial
-    - attempting the continuous thoughts version:
-        - to generate a continuous thought, simply stop on an earlier layer and return the residual stream vector
-        - This vector gets appended to the input context. The context vector for normal tokens is simply the embedding, as usual.
-        - We recursively feed it through to get more thinking tokens, with gradients on the whole time, just like an rnn.
+- An even simpler, toyer task for tokenized thoughts: tokenized autoencoders:
+    - I settled on the 'blind' modification to the tokenized thoughts model.
+        - This is where we have 2 separate models. One is the thinking policy, one is the answering policy.
+        - The thinking policy sees the question and all previous though tokens, and produces another thought token.
+        - The answering policy, given a chain of thought (and not the original context!) produces a final answer.
+    - This is actually quite similair then to an autoencoder. We need to push some info through a bottleneck so that it can be recovered (or something else  can be done with the info) on the other side.
+    - The biggest difference here is that the bottleneck is tokenization, forcing the outputs to be discrete, rather than continuous.
+        - This causes a huge problem becuase tokenization is not differentiable!
+        - In a normal AE, we can differentiate from the loss to the intermediate result, through to the weights that produced the intermediate result.
+        - In this AE, this is not possible, so the reparametrization trick is used.
+            - We simply take the reconstruction loss as a detached scalar value, and multiply it by the -logprob of producing the intermediate thinking tokens that were produced. This allows us to use the reconstruction loss to train the encoder given a particular tokenized intermediate result that it produced.
+    - Specific test scenario: The models are given a token and tasked with simply recovering and outputting it. Specifically:
+        - The input number (token, whatever) lies between 0 and M.
+        - The thinking policy is given this and autoregressively produces T thinking tokens, having L_t different thinking tokens to choose from.
+        - The answering policy is given the string of T thinking tokens, and prodces a distribution over possible input tokens.
+        - The answering policy's loss is simply the logprob on the correct input token. Normal reconstruction loss.
+        - But since the thinking policy is a separate model, it also needs its own loss function which takes in the string of thinking tokens.
+        - Here is the reparameterization trick. We can differentiate with respect to the logprobs of the thinking tokens that it emitted, multiplied by how well the answering policy was able to reconstruct based on them.
+    - You can imagine a few qualitatively different scenarios here based on the hyperparameters.
+        - If M == T, the model simply needs to learn some 1 to 1 coding scheme where a single thinking token corresponds to a single input.
+            - if the input is x, thinking policy outputs token y. If the answering policy sees thinking token y, the input was x.
+        - If M < T, same as above except multiple thinking tokens could represent the same answer.
+        - If M > T however, we now have a real information bottleneck. One thinking token cannot possible encode all the necessary information. More complex coding schemes are required to cross the gap.
+            - Depending on M, T, and L_t, perfect reconstruction may be impossible.
+                - Specifically, if log base T of M <= L_t, perfect reconstruction is possible.
+    - Starting with the M == T scenario, all the model has to learn is a 1-1 mapping. The issue turns out to be the gradient flow.
+        - The hurdle here is steep: both model's need to learn eachother's coding scheme based solely on their outputs.
+            - The answering policy is getting updated to follow what the thinking policy is doing, and vice versa.
+                - If we apply small biases towards a particular mapping in the logits when we sample thinking tokens, the answering model picks up on it, and the thinking policy accordingly picks up on what the answering model is learning, etc.
+        - Of course at the start both know nothing, but random weight init provides some initial tendencies in the distributions of the thinking policy.
+            - In practice this only gives us the smallest boost in accuracy over random chance. It seems there are few tendencies strong enough to get canonized.
+        - What is needed here is some spontaneous symmetry breaking. If either model just draws out of a hat and picks some random association and sticks to it, the hill is exceedingly easy for the other model to follow.
+            - So how do we escape the noise regime?
+    
+    - tokenized AE success!
+        - The bottleneck across the channel seems to just be more than RL can handle.
+        - If we sample from the think logits with gradients on using the gumbel softmax trick, then it works
+            - It can learn 1-1 mappings, or multi-token mappings and goes to >.9 acc swiftly.
 
 - naming conventions:
     - *add*: training a model for the toy task of modular addition

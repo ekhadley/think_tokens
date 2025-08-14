@@ -1,5 +1,6 @@
 import random
 import itertools
+import os
 from tqdm import trange
 import torch as t
 from torch import nn
@@ -20,7 +21,7 @@ yellow = '\x1b[38;2;255;255;0m'
 red = '\x1b[38;2;255;0;0m'
 pink = '\x1b[38;2;255;51;204m'
 orange = '\x1b[38;2;255;51;0m'
-green = '\x1b[38;2;0;0;128m'
+green = '\x1b[38;2;5;170;20m'
 gray = '\x1b[38;2;127;127;127m'
 magenta = '\x1b[38;2;128;0;128m'
 white = '\x1b[38;2;255;255;255m'
@@ -29,7 +30,7 @@ underline = '\033[4m'
 endc = '\033[0m'
 
 t.backends.cuda.enable_flash_sdp(enabled=True)
-t.set_printoptions(sci_mode=False, linewidth=400, edgeitems=5)
+t.set_printoptions(sci_mode=False, linewidth=200, edgeitems=4)
 
 class SimpleTokenizer:
     def __init__(self, max_int):
@@ -80,49 +81,6 @@ def sampleLogprobs(logprobs: t.Tensor, temperature: float = 1.0, top_k: int = 0,
         logprobs[indices_to_remove] = -float('Inf')
     probs = F.softmax(logprobs, dim=-1)
     return t.multinomial(probs, num_samples=1)
-
-def makeMultiAdditionDataset(int_max: int, num_adds: int, n_train: int, train_split: float = 1.0):
-    #unique_questions = [[n1, n2] for n1 in range(int_max) for n2 in range(int_max)]
-    unique_questions = list(itertools.product(range(int_max), repeat=num_adds))
-    random.shuffle(unique_questions)
-    n_unique = len(unique_questions)
-
-    n_unique_train = min(int(n_unique * train_split) if train_split < 1 else n_unique, n_train)
-    n_test = min(n_unique - n_unique_train, int(n_train * (1 - train_split)))
-    assert n_unique_train > 0, f"For int_max={int_max}, train split must be 0 or > {1/n_unique}"
-    print(gray, f"Dataset has {n_unique:,} unique questions. {n_unique_train:,} in train and {n_test:,} in test.", endc)
-    test_questions = unique_questions[n_unique_train:] # grab all our uniqiue examples for each set
-    train_questions = unique_questions[:n_unique_train]
-    if n_unique_train < n_train:
-        extra_needed = n_train - n_unique_train
-        train_questions += random.choices(train_questions, k=extra_needed)
-
-    question_arr = np.array(train_questions)
-    answer_toks = question_arr.sum(axis=-1) % int_max
-    question_toks = np.unstack(question_arr, axis=0)
-    train_dataset = pd.DataFrame({
-        "question_toks": question_toks,
-        "answer_tok": answer_toks,
-    })
-    train_dataset.attrs['n_examples'] = n_train
-    train_dataset.attrs['input_max'] = int_max
-    train_dataset.attrs['num_adds'] = num_adds
-    train_dataset.attrs['question_len'] = len(question_toks[0]) if train_questions else 0
-    if n_test > 0:
-        test_question_arr = np.array(test_questions)
-        test_answer_toks = test_question_arr.sum(axis=-1) % int_max
-        test_question_toks = np.unstack(test_question_arr, axis=0)
-        test_dataset = pd.DataFrame({
-            "question_toks": test_question_toks,
-            "answer_tok": test_answer_toks,
-        })
-        test_dataset.attrs['n_examples'] = n_test
-        test_dataset.attrs['input_max'] = int_max
-        test_dataset.attrs['num_adds'] = num_adds
-        test_dataset.attrs['question_len'] = len(question_toks[0]) if test_questions else 0
-        return train_dataset, test_dataset
-    else:
-        return train_dataset
 
 def sampleLogits(logits: t.Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 1.0, ) -> t.Tensor:
     logits = logits.squeeze() / temperature
@@ -177,8 +135,13 @@ def loadTokenizedDataset(name: str):
     return dataset
 
 # plotting stuff
-def line(logits: t.Tensor) -> None:
-    plot = plotly.graph_objects.Figure()
+def line(logits: t.Tensor, ymin: float|None = None, ymax: float|None = None) -> None:
+    if ymax is not None:
+        assert ymin is not None, "If ymax is specified, ymin must also be specified."
+        plot = plotly.graph_objects.Figure(layout_yaxis_range=[ymin, ymax])
+    else:
+        assert ymin is None, "If ymin is specified, ymax must also be specified."
+        plot = plotly.graph_objects.Figure()
     plot.add_trace(plotly.graph_objects.Scatter(y=logits.squeeze().cpu().numpy(), mode='lines', name='logits'))
     plot.show()
 
@@ -280,3 +243,96 @@ def resize_embedding(target_embed, source_embed):
         if new_weight.shape[0] > old_weight.shape[0]:
             nn.init.normal_(new_weight[old_weight.shape[0]:], mean=0.0, std=0.02)
         target_embed.weight.data = new_weight
+
+
+def chess_coord_to_int(coord):
+    """
+    Convert chess coordinate (like 'a1', 'h8') to integer.
+    a1=0, b1=1, c1=2, ..., h1=7, a2=8, b2=9, ..., h8=63
+    """
+    if len(coord) != 2:
+        raise ValueError(f"Invalid coordinate: {coord}")
+    
+    file_char = coord[0].lower()
+    rank_char = coord[1]
+    
+    if file_char < 'a' or file_char > 'h':
+        raise ValueError(f"Invalid file: {file_char}")
+    if rank_char < '1' or rank_char > '8':
+        raise ValueError(f"Invalid rank: {rank_char}")
+    
+    file_idx = ord(file_char) - ord('a')  # a=0, b=1, ..., h=7
+    rank_idx = int(rank_char) - 1         # 1=0, 2=1, ..., 8=7
+    
+    return rank_idx * 8 + file_idx
+
+def int_to_chess_coord(coord_int):
+    """
+    Convert integer back to chess coordinate.
+    0=a1, 1=b1, 2=c1, ..., 7=h1, 8=a2, 9=b2, ..., 63=h8
+    """
+    if coord_int < 0 or coord_int > 63:
+        raise ValueError(f"Invalid coordinate integer: {coord_int}")
+    
+    rank_idx = coord_int // 8
+    file_idx = coord_int % 8
+    
+    file_char = chr(ord('a') + file_idx)
+    rank_char = str(rank_idx + 1)
+    
+    return file_char + rank_char
+
+def lan_move_to_tokens(lan_move):
+    """
+    Convert a LAN move (like 'e2e4') to two tokens [start_square, end_square].
+    """
+    if len(lan_move) != 4:
+        raise ValueError(f"Invalid LAN move: {lan_move}")
+    
+    start_coord = lan_move[:2]
+    end_coord = lan_move[2:]
+    
+    start_token = chess_coord_to_int(start_coord)
+    end_token = chess_coord_to_int(end_coord)
+    
+    return [start_token, end_token]
+
+def tokenize_chess_games(chess_df):
+    """
+    Tokenize chess games into coordinate integers.
+    Each move becomes 2 tokens: [start_square, end_square]
+    """
+    print("Tokenizing chess games...")
+    tokenized_games = []
+    failed_games = 0
+    
+    for idx, row in tqdm.tqdm(chess_df.iterrows(), total=len(chess_df), desc="Tokenizing games"):
+        try:
+            if 'lan' in chess_df.columns and pd.notna(row['lan']):
+                # Use LAN notation
+                moves = row['lan'].split()
+                game_tokens = []
+                
+                for move in moves:
+                    try:
+                        tokens = lan_move_to_tokens(move)
+                        game_tokens.extend(tokens)
+                    except ValueError:
+                        # Skip invalid moves
+                        continue
+                
+                tokenized_games.append(np.array(game_tokens, dtype=np.int8))
+            else:
+                # No LAN data available
+                tokenized_games.append(np.array([], dtype=np.int8))
+                failed_games += 1
+                
+        except Exception as e:
+            # Failed to tokenize this game
+            tokenized_games.append(np.array([], dtype=np.int8))
+            failed_games += 1
+    
+    print(f"Successfully tokenized {len(tokenized_games) - failed_games} games")
+    print(f"Failed to tokenize {failed_games} games")
+    
+    return tokenized_games

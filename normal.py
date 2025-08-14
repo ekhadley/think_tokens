@@ -46,8 +46,10 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
 
 if __name__ == "__main__":
     t.set_default_device(t.device("cuda"))
+    t.manual_seed(42)
+    random.seed(42)
 
-    model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, d_head=64, n_heads=8, n_layers=8, d_vocab=50257)
+    model_cfg = ModelConfig(d_model=512, seq_len=256, d_mlp=2048, n_heads=8, n_layers=8, d_vocab=64)
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
@@ -57,7 +59,7 @@ if __name__ == "__main__":
         adam_beta2=0.95
     )
 
-    #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
-    dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
+    dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
+    #dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
     
     train(model, training_cfg, dataset)
