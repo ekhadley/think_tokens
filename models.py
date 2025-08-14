@@ -255,7 +255,7 @@ class Recycler(nn.Module):
         self.pos_embed = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.unembed = nn.Linear(cfg.d_model, cfg.d_vocab, bias=False)
         self.tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained("gpt2")
-        self.mixing_attn = nn.MultiheadAttention(cfg.d_model, cfg.n_heads, batch_first=True)
+        self.mixing_attn = nn.MultiheadAttention(cfg.d_model, 1, batch_first=True)
         
     # forward passes like an rnn. Takes a continuous 2d context of previous text and a single new token, outputs the new context vector and a distn for next token prediction
     # the context vector is one of the later layer hidden states (residual stream vectors) for the last token position. Context is combined by simple concatenation.

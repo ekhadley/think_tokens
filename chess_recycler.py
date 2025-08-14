@@ -177,7 +177,7 @@ if __name__ == "__main__":
 
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=1e-2,
+        lr=1e-3,
         weight_decay=1e-4,
     )
 
