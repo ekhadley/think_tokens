@@ -58,8 +58,9 @@ class TransformerBlock(nn.Module):
     
     def forward(self, x: Tensor) -> Tensor:
         if x.ndim == 2: x = x.unsqueeze(0)
+        # Explicit causal mask for compatibility across PyTorch versions
         seq_len = x.shape[1]
-        attn_mask = t.triu(t.ones((seq_len, seq_len)), diagonal=1).bool()
+        attn_mask = t.triu(t.ones((seq_len, seq_len), device=x.device, dtype=t.bool), diagonal=1)
         attn_output, _ = self.attn(x, x, x, is_causal=True, attn_mask=attn_mask)
         x = self.norm1(x + attn_output)
         ff_output = self.linear2(self.act(self.linear1(x)))
@@ -89,7 +90,6 @@ class GPT2(nn.Module):
             x = block(x)
         x = self.ln_f(x)
         x = self.unembed(x) # untied
-        #x = F.linear(x, self.embed.weight) # tied
         return x
     def yap(self, prompt: str, max_length: int = 50):
         with t.no_grad():
@@ -245,7 +245,7 @@ class RecycleModelConfig:
         return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
 
 class Recycler(nn.Module):
-    def __init__(self, cfg: ModelConfig):
+    def __init__(self, cfg: RecycleModelConfig):
         super(Recycler, self).__init__()
         assert cfg.recycle_layer < cfg.n_layers, "Recycle layer must be less than total layers"
         self.cfg = cfg
@@ -277,8 +277,9 @@ class Recycler(nn.Module):
             x = context
 
         seq_len = x.shape[1]
-
-        x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0) # Add positional embeddings
+        # Add positional embeddings only to the new token position when context exists,
+        # to avoid re-adding position to recycled hidden states.
+        x[:, -1, :] = x[:, -1, :] + self.pos_embed(t.tensor([seq_len - 1], device=x.device)).squeeze()
         for i, block in enumerate(self.blocks):
             x = block(x)
             if i == self.cfg.recycle_layer:
@@ -303,8 +304,8 @@ class Recycler(nn.Module):
         elif context is None: x = token_embed
         else: x = context
         seq_len = x.shape[1]
-
-        x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0)
+        # Avoid re-adding positional embeddings to recycled hidden states
+        x[:, -1, :] = x[:, -1, :] + self.pos_embed(t.tensor([seq_len - 1], device=x.device)).squeeze()
         for i, block in enumerate(self.blocks):
             x = block(x)
             if i == self.cfg.recycle_layer:
@@ -314,22 +315,27 @@ class Recycler(nn.Module):
         return x, distn
 
     # like forward1 but uses an attention layer like a gate, selectively crossing over the recycled context and the normal token embeddings.
-    def forward3(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    def forward3(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True, show_pattern: bool = False) -> tuple[Tensor, Tensor] | Tensor: 
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)
         assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
         
         token_seq_len = tokens.shape[1]
         token_embeds = self.embed(tokens)  # (batch, token_seq_len, d_model)
-        token_embeds += self.pos_embed(t.arange(token_seq_len)).unsqueeze(0)  # Add positional embeddings to the token embeddings
+        token_embeds = token_embeds + self.pos_embed(t.arange(token_seq_len, device=token_embeds.device)).unsqueeze(0)  # Add positional embeddings to the token embeddings
 
         if context is not None:
             if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
             assert context.ndim == 3, "Context should be (batch, seq, d_model)"
             context_seq_len = context.shape[1]
-            total_seq_len = context_seq_len + token_seq_len
             combined = t.cat([context, token_embeds], dim=1)  # (batch, total_seq_len, d_model)
-            attn_mask = t.triu(t.full((total_seq_len, total_seq_len), 1, dtype=t.bool), diagonal=1)
-            mixed_embeds, _ = self.mixing_attn(combined, combined, combined, attn_mask=attn_mask, is_causal=True)
+            total_seq_len = combined.shape[1]
+            attn_mask = t.triu(t.ones((total_seq_len, total_seq_len), device=combined.device, dtype=t.bool), diagonal=1)
+            mixed_embeds, weights = self.mixing_attn(combined, combined, combined, is_causal=True, attn_mask=attn_mask, need_weights=show_pattern)
+            if show_pattern:
+                imshow(weights[0])
+                print(pink, self.mixing_attn.in_proj_weight[0, :10], endc)
+                print(purple, self.blocks[0].attn.in_proj_weight[0, :10], endc)
+            
             x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
         else:
             x = token_embeds
@@ -354,20 +360,23 @@ class Recycler(nn.Module):
         assert token.ndim == 2, "Token should be single item or 1D tensor"
 
         token_embed = self.embed(token) if token is not None else None
-        if context is not None:
-            if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
-            assert context.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
 
         if context is not None and token_embed is not None:
             x = t.cat([context, token_embed], dim=1)  # Concatenate context with the new token embedding
         elif context is None:
             x = token_embed
-        else:
+        elif token_embed is None:
+            if context.ndim == 2: context = context.unsqueeze(0)  # Ensure context is 3D
+            assert context.ndim == 3, "Context should be (batch, seq, d_model) or (seq, d_model)"
             x = context
+        else:
+            raise ValueError("Either token or context must be provided")
 
         seq_len = x.shape[1]
-
-        x += self.pos_embed(t.arange(seq_len, device=x.device)).unsqueeze(0) # Add positional embeddings
+        tok_embed_indices = t.tensor([i for i in range(0, seq_len, 2)], device=x.device)
+        pos = self.pos_embed(tok_embed_indices).unsqueeze(0)
+        x[:, tok_embed_indices, :] = x[:, tok_embed_indices, :] + pos
+        
         for i, block in enumerate(self.blocks):
             x = block(x)
             if i == self.cfg.recycle_layer:
