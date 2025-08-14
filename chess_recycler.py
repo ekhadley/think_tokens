@@ -119,24 +119,24 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
             context_parts: list[t.Tensor] = []
             logit_parts: list[t.Tensor] = []
-            for s in range(seq_len):
-                next_toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-                cur_toks = tokens[:, :s+1]
-                context = t.cat(context_parts, dim=1) if s != 0 else None
-                #new_ctx, new_logits = model.forward(next_toks, context)
-                new_ctx, new_logits = model.forward5(cur_toks, context)#, show_pattern=(i%256==0 and s == 24))
-                context_parts.append(new_ctx.unsqueeze(1))
-                logit_parts.append(new_logits.unsqueeze(1))
-
             #for s in range(seq_len):
-                #toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-                #context = t.cat(context_parts, dim=1) if s > 0 else None
-                #new_ctx, new_logits = model.forward4(toks, context)
-                #logit_parts.append(new_logits.unsqueeze(1))
-                
-                #tok_embeds = model.embed(toks).reshape(batch_size, d_model)
-                #context_parts.append(tok_embeds.unsqueeze(1))
+                #next_toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
+                #cur_toks = tokens[:, :s+1]
+                #context = t.cat(context_parts, dim=1) if s != 0 else None
+                ##new_ctx, new_logits = model.forward(next_toks, context)
+                #new_ctx, new_logits = model.forward5(cur_toks, context)#, show_pattern=(i%256==0 and s == 24))
                 #context_parts.append(new_ctx.unsqueeze(1))
+                #logit_parts.append(new_logits.unsqueeze(1))
+
+            for s in range(seq_len):
+                toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
+                context = t.cat(context_parts, dim=1) if s > 0 else None
+                new_ctx, new_logits = model.forward6(toks, context)
+                logit_parts.append(new_logits.unsqueeze(1))
+                
+                tok_embeds = model.embed(toks).reshape(batch_size, d_model)
+                context_parts.append(tok_embeds.unsqueeze(1))
+                context_parts.append(new_ctx.unsqueeze(1))
             
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
@@ -177,7 +177,7 @@ if __name__ == "__main__":
 
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=3e-4,
+        lr=3e-3,
         weight_decay=1e-4,
     )
 
