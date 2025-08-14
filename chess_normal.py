@@ -71,13 +71,13 @@ if __name__ == "__main__":
     )
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
-        lr=1e-3,
+        lr=3e-3,
         batch_size=64,
-        weight_decay=1e-6,
+        weight_decay=1e-4,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]
     dataset.set_format(type='torch')
     trainset, testset = dataset.train_test_split(test_size=0.005).values()
     
-    train(model, training_cfg, trainset, testset, epochs=10)
+    train(model, training_cfg, trainset, testset, epochs=5)
