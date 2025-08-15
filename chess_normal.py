@@ -20,7 +20,7 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
     model.train()
 
-    wandb.init(project="gpt_chess", name="normal", config=cfg)
+    wandb.init(project="gpt_chess", name="normal_big", config=cfg)
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
     wandb.config.update(run_cfg)
 
@@ -28,8 +28,6 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
 
     seq_len = trainset['input_ids'].shape[-1]
     seq_indices = t.arange(seq_len - 1, requires_grad=False)
-
-    xd = 22
 
     for e in range(epochs):
         dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
@@ -39,8 +37,6 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
             logits = model(tokens)
             logprobs = t.log_softmax(logits[:, :-1], dim=-1)
             loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
-            #logprobs = t.log_softmax(logits[:, xd-1], dim=-1)
-            #loss = -logprobs[t.arange(batch_size), tokens[:, xd].squeeze()].mean()
 
             optimizer.zero_grad()
             loss.backward()
@@ -60,20 +56,20 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 64
+    d_model = 128
     model_cfg = ModelConfig(
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
         n_heads=4,
-        n_layers=4,
+        n_layers=8,
         d_vocab=64
     )
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         lr=3e-3,
         batch_size=64,
-        weight_decay=1e-4,
+        weight_decay=1e-6,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

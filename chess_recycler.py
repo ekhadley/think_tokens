@@ -9,7 +9,7 @@ from models import Recycler, RecycleModelConfig, TrainingConfig
 
 # Takes vector of next tokens for the batch and produces single context output vector.
 @t.inference_mode()
-def test_accuracy_recycler1(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+def test_accuracy_recycler_replace_embed(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
     device = model.embed.weight.device
     tokens = dataset['input_ids'].to(device)
     batch_size, seq_len = tokens.shape
@@ -18,7 +18,7 @@ def test_accuracy_recycler1(model: Recycler, dataset: datasets.Dataset) -> tuple
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
         toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-        new_ctx, new_logits = model.forward(toks, ctx[:, :s] if s != 0 else None)
+        new_ctx, new_logits = model.forward_replace_embeddings(toks, ctx[:, :s] if s != 0 else None)
         logits[:, s, :] = new_logits
         ctx[:, s, :] = new_ctx
     logprobs = t.log_softmax(logits, dim=-1)
@@ -30,7 +30,7 @@ def test_accuracy_recycler1(model: Recycler, dataset: datasets.Dataset) -> tuple
 
 # changes and returns the whole hidden state on each forward pass.
 @t.inference_mode()
-def test_accuracy_recycler2(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+def test_accuracy_recycler_full_context_replace(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
     device = model.embed.weight.device
     tokens = dataset['input_ids'].to(device)
     batch_size, seq_len = tokens.shape
@@ -39,7 +39,7 @@ def test_accuracy_recycler2(model: Recycler, dataset: datasets.Dataset) -> tuple
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
         toks = tokens[:, s].reshape(-1, 1)
-        ctx, new_logits = model.forward2(toks, ctx)
+        ctx, new_logits = model.forward_full_context_replace(toks, ctx)
         logits[:, s, :] = new_logits
     logprobs = t.log_softmax(logits, dim=-1)
     logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
@@ -50,7 +50,7 @@ def test_accuracy_recycler2(model: Recycler, dataset: datasets.Dataset) -> tuple
 
 # takes all prev and current tokens of each seq in the batch as input. Returns a single new context vector like forward1.
 @t.inference_mode()
-def test_accuracy_recycler3(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+def test_accuracy_recycler_attn_gate(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
     device = model.embed.weight.device
     tokens = dataset['input_ids'].to(device)
     batch_size, seq_len = tokens.shape
@@ -59,7 +59,7 @@ def test_accuracy_recycler3(model: Recycler, dataset: datasets.Dataset) -> tuple
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
         toks = tokens[:, :s+1]
-        new_ctx, new_logits = model.forward3(toks, ctx[:, :s] if s != 0 else None)
+        new_ctx, new_logits = model.forward_attn_gate(toks, ctx[:, :s] if s != 0 else None)
         logits[:, s, :] = new_logits
         ctx[:, s, :] = new_ctx
     logprobs = t.log_softmax(logits, dim=-1)
@@ -70,7 +70,7 @@ def test_accuracy_recycler3(model: Recycler, dataset: datasets.Dataset) -> tuple
     return correct, logprob_correct
 
 @t.inference_mode()
-def test_accuracy_recycler4(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+def test_accuracy_recycler_interleaved_embeddings(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
     device = model.embed.weight.device
     tokens = dataset['input_ids'].to(device)
     batch_size, seq_len = tokens.shape
@@ -79,7 +79,7 @@ def test_accuracy_recycler4(model: Recycler, dataset: datasets.Dataset) -> tuple
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
         toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-        new_ctx, new_logits = model.forward4(toks, ctx[:, :s*2] if s != 0 else None)
+        new_ctx, new_logits = model.forward_interleaved_embeddings(toks, ctx[:, :s*2] if s != 0 else None)
         logits[:, s, :] = new_logits
         
         tok_embeds = model.embed(toks).reshape(batch_size, d_model)
@@ -119,19 +119,21 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
             context_parts: list[t.Tensor] = []
             logit_parts: list[t.Tensor] = []
-            #for s in range(seq_len):
+            #for s in range(seq_len): # this one is for non-interleaved embedding approaches
                 #next_toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
                 #cur_toks = tokens[:, :s+1]
                 #context = t.cat(context_parts, dim=1) if s != 0 else None
-                ##new_ctx, new_logits = model.forward(next_toks, context)
-                #new_ctx, new_logits = model.forward5(cur_toks, context)#, show_pattern=(i%256==0 and s == 24))
+                ##new_ctx, new_logits = model.forward_replace_embeddings(next_toks, context)
+                #new_ctx, new_logits = model.forward_attn_gate(next_toks, context)
                 #context_parts.append(new_ctx.unsqueeze(1))
                 #logit_parts.append(new_logits.unsqueeze(1))
 
-            for s in range(seq_len):
+            for s in range(seq_len): # for interleaved embedding approaches
                 toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                new_ctx, new_logits = model.forward6(toks, context)
+                new_ctx, new_logits = model.forward_interleaved_embeddings(toks, context)
+                #new_ctx, new_logits = model.forward_attn_gate_interleaved(toks, context)
+                #new_ctx, new_logits = model.forward_recycler_block_interleaved(toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
                 tok_embeds = model.embed(toks).reshape(batch_size, d_model)
@@ -148,7 +150,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
             if i % 32 == 0:
-                accuracy, _ = test_accuracy_recycler3(model, testset)
+                accuracy, _ = test_accuracy_recycler_interleaved_embeddings(model, testset)
                 #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
             
             optimizer.step()    
@@ -177,8 +179,8 @@ if __name__ == "__main__":
 
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=3e-3,
-        weight_decay=1e-4,
+        lr=1e-3,
+        weight_decay=1e-6,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

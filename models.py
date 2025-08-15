@@ -260,7 +260,7 @@ class Recycler(nn.Module):
         
     # forward passes like an rnn. Takes a continuous 2d context of previous text and a single new token, outputs the new context vector and a distn for next token prediction
     # the context vector is one of the later layer hidden states (residual stream vectors) for the last token position. Context is combined by simple concatenation.
-    def forward(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    def forward_replace_embed(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token.ndim == 1: token = token.unsqueeze(0)
         assert token.ndim == 2, "Token should be single item or 1D tensor"
@@ -291,7 +291,7 @@ class Recycler(nn.Module):
         return new_context, distn
 
     # fully recurrent version. Instead of returning a single context vector for each forward pass, it returns an entirely different hidden state
-    def forward2(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    def forward_full_context_replace(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token.ndim == 1: token = token.unsqueeze(0)
         assert token.ndim == 2, "Token should be single item or 1D tensor"
@@ -315,8 +315,9 @@ class Recycler(nn.Module):
         distn = self.unembed(x[:, -1, :])
         return x, distn
 
-    # like forward1 but uses an attention layer like a gate, selectively crossing over the recycled context and the normal token embeddings.
-    def forward3(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True, show_pattern: bool = False) -> tuple[Tensor, Tensor] | Tensor: 
+    # like forward_replace_embed but uses an attention layer like a gate, selectively crossing over the recycled context and the normal token embeddings.
+    # basically pre-cats all the recycled context to the current token embeddings
+    def forward_attn_gate(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True, show_pattern: bool = False) -> tuple[Tensor, Tensor] | Tensor: 
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)
         assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
         
@@ -337,7 +338,8 @@ class Recycler(nn.Module):
                 print(pink, self.mixing_attn.in_proj_weight[0, :10], endc)
                 print(purple, self.blocks[0].attn.in_proj_weight[0, :10], endc)
             
-            x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
+            #x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
+            x = mixed_embeds[:, :context_seq_len:, :]  # (batch, token_seq_len, d_model)
         else:
             x = token_embeds
         
@@ -352,10 +354,9 @@ class Recycler(nn.Module):
         distn = self.unembed(x)  # Get next token distribution
         return new_context, distn
 
-    # like above but simpler.
     # the input context is simply the embedding for token 0, recycled vector for token 0, embedding for token 1, recycled vector for token 1, etc.
     # each sequence position is now two sequence positions. 
-    def forward4(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    def forward_interleaved_embeddings(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token.ndim == 1: token = token.unsqueeze(0)
         assert token.ndim == 2, "Token should be single item or 1D tensor"
@@ -374,9 +375,8 @@ class Recycler(nn.Module):
             raise ValueError("Either token or context must be provided")
 
         seq_len = x.shape[1]
-        tok_embed_indices = t.tensor([i for i in range(0, seq_len, 2)], device=x.device)
-        pos = self.pos_embed(tok_embed_indices).unsqueeze(0)
-        x[:, tok_embed_indices, :] = x[:, tok_embed_indices, :] + pos
+        seq_indices = t.arange(seq_len//2, device=x.device)
+        x[:, seq_indices*2, :] = x[:, seq_indices*2, :] + self.pos_embed(seq_indices).unsqueeze(0)
         
         for i, block in enumerate(self.blocks):
             x = block(x)
@@ -387,7 +387,8 @@ class Recycler(nn.Module):
         distn = self.unembed(x) # unembed the last position residual stream to get next token distn
         return new_context, distn
 
-    def forward5(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    # like attn_gate but with interleaved embeddings.
+    def forward_attn_gate_interleaved(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)
         assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
 
@@ -419,7 +420,8 @@ class Recycler(nn.Module):
         distn = self.unembed(x)
         return new_context, distn
     
-    def forward6(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    # like attn_gate_interleaved but with a separate, alternative recycler block at recycle_layer whose output we actually recycle.
+    def forward_recycler_block_interleaved(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token is not None and token.ndim == 1: token = token.unsqueeze(0)
         if token is not None: assert token.ndim == 2, "Token should be single item or 1D tensor"
@@ -439,7 +441,7 @@ class Recycler(nn.Module):
 
         seq_len = x.shape[1]
         tok_embed_indices = t.tensor([i for i in range(0, seq_len, 2)], device=x.device)
-        pos = self.pos_embed(tok_embed_indices).unsqueeze(0)
+        pos = self.pos_embed(tok_embed_indices/2).unsqueeze(0)
         x[:, tok_embed_indices, :] = x[:, tok_embed_indices, :] + pos
 
         for i, block in enumerate(self.blocks):
