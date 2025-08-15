@@ -455,8 +455,8 @@ class Recycler(nn.Module):
             x = block(x)
             if i == self.cfg.recycle_layer - 1:
                 recycler_stream = self.recycler_block(x)
-                new_context = recycler_stream[:, -1, :]
-                #new_context = recycler_stream[:, -1, :] - x[:, -1, :]
+                #new_context = recycler_stream[:, -1, :]
+                new_context = recycler_stream[:, -1, :] - x[:, -1, :]
                 if not need_distn:
                     return new_context
 
