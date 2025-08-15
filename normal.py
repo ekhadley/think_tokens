@@ -11,7 +11,7 @@ def train(model, cfg: TrainingConfig, dataset: datasets.Dataset):
 
     model.train()
 
-    wandb.init(project="thoughtful", name="gpt2s_normal", config=cfg)
+    wandb.init(project="thoughtful", name="normal", config=cfg)
     wandb.watch(model, log="all")
     wandb.config.update(model.cfg.to_dict())
     wandb.config.update(cfg.to_dict())

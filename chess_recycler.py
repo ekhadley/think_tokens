@@ -52,7 +52,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     model.train()
 
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="gpt_chess", name="recycler", config=run_cfg)
+    wandb.init(project="gpt_chess", name="recycler_skinny", config=run_cfg)
 
     batch_size = cfg.batch_size
     seq_len = trainset['input_ids'].shape[1]
@@ -84,9 +84,9 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                 next_toks = tokens[:, s].reshape(batch_size)
                 cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                #new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
+                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
                 #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
-                new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
                 tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
@@ -101,7 +101,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
             if i % 32 == 0:
                 #accuracy, _ = test_accuracy_recycler_attn_gate(model, testset)
-                accuracy, _ = test_accuracy_recycler(model, Recycler.forward_recycler_block_interleaved, testset)
+                accuracy, _ = test_accuracy_recycler(model, Recycler.forward_interleaved_embeddings, testset)
                 #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
             
             optimizer.step()    
@@ -116,14 +116,14 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 64
+    d_model = 16
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
         n_heads=4,
-        n_layers=4,
-        recycle_layer=3,
+        n_layers=24,
+        recycle_layer=21,
         d_vocab=64,
     )
     model = Recycler(model_cfg)
