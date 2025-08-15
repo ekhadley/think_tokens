@@ -179,8 +179,8 @@ if __name__ == "__main__":
 
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=1e-3,
-        weight_decay=1e-6,
+        lr=3e-3,
+        weight_decay=1e-4,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]

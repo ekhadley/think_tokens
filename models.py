@@ -261,6 +261,7 @@ class Recycler(nn.Module):
     # forward passes like an rnn. Takes a continuous 2d context of previous text and a single new token, outputs the new context vector and a distn for next token prediction
     # the context vector is one of the later layer hidden states (residual stream vectors) for the last token position. Context is combined by simple concatenation.
     def forward_replace_embed(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "replace_embed"
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token.ndim == 1: token = token.unsqueeze(0)
         assert token.ndim == 2, "Token should be single item or 1D tensor"
@@ -292,6 +293,7 @@ class Recycler(nn.Module):
 
     # fully recurrent version. Instead of returning a single context vector for each forward pass, it returns an entirely different hidden state
     def forward_full_context_replace(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "full_context_replace"
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token.ndim == 1: token = token.unsqueeze(0)
         assert token.ndim == 2, "Token should be single item or 1D tensor"
@@ -318,6 +320,7 @@ class Recycler(nn.Module):
     # like forward_replace_embed but uses an attention layer like a gate, selectively crossing over the recycled context and the normal token embeddings.
     # basically pre-cats all the recycled context to the current token embeddings
     def forward_attn_gate(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True, show_pattern: bool = False) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "attn_gate"
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)
         assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
         
@@ -357,6 +360,7 @@ class Recycler(nn.Module):
     # the input context is simply the embedding for token 0, recycled vector for token 0, embedding for token 1, recycled vector for token 1, etc.
     # each sequence position is now two sequence positions. 
     def forward_interleaved_embeddings(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "interleaved_embeddings"
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token.ndim == 1: token = token.unsqueeze(0)
         assert token.ndim == 2, "Token should be single item or 1D tensor"
@@ -389,6 +393,7 @@ class Recycler(nn.Module):
 
     # like attn_gate but with interleaved embeddings.
     def forward_attn_gate_interleaved(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "attn_gate_interleaved"
         if tokens.ndim == 1: tokens = tokens.unsqueeze(0)
         assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
 
@@ -422,6 +427,7 @@ class Recycler(nn.Module):
     
     # like attn_gate_interleaved but with a separate, alternative recycler block at recycle_layer whose output we actually recycle.
     def forward_recycler_block_interleaved(self, token: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "recycler_block_interleaved"
         assert token is not None or context is not None, "Either a first token or an context state must be provided"
         if token is not None and token.ndim == 1: token = token.unsqueeze(0)
         if token is not None: assert token.ndim == 2, "Token should be single item or 1D tensor"
