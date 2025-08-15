@@ -21,9 +21,10 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: datasets.Dataset):
 
         logits = model(tokens)
         logprobs = t.log_softmax(logits[:, :-1], dim=-1)
-        loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+        #loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+        loss = t.nn.functional.cross_entropy(logits[:, :-1].reshape(-1, logits.shape[-1]), tokens[:, 1:].reshape(-1)).mean()
         loss.backward()
-        grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
+        grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True).item()
 
         optimizer.step()
         optimizer.zero_grad()
@@ -48,7 +49,7 @@ if __name__ == "__main__":
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=1e-3,
+        lr=3e-4,
         weight_decay=1e-6,
     )
 
