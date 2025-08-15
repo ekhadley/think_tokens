@@ -95,6 +95,7 @@ def test_accuracy_recycler_interleaved_embeddings(model: Recycler, dataset: data
     return correct, logprob_correct
 
 # attn gate (uses all prev and current tokens) + interleaved embeddings
+@t.inference_mode()
 def test_accuracy_recycler_attn_gate_interleaved(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
     device = model.embed.weight.device
     tokens = dataset['input_ids'].to(device)
@@ -192,8 +193,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                 cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
                 #new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
-                new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
-                #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
+                new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
                 tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
@@ -208,7 +209,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
             if i % 32 == 0:
                 #accuracy, _ = test_accuracy_recycler_interleaved_embeddings(model, testset)
-                accuracy, _ = test_accuracy_recycler(model, Recycler.forward_attn_gate_interleaved, testset)
+                accuracy, _ = test_accuracy_recycler(model, Recycler.forward_recycler_block_interleaved, testset)
                 #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
             
             optimizer.step()    
