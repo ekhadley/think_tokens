@@ -446,9 +446,8 @@ class Recycler(nn.Module):
             raise ValueError("Either token or context must be provided")
 
         seq_len = x.shape[1]
-        tok_embed_indices = t.tensor([i for i in range(0, seq_len, 2)], device=x.device)
-        pos = self.pos_embed(tok_embed_indices/2).unsqueeze(0)
-        x[:, tok_embed_indices, :] = x[:, tok_embed_indices, :] + pos
+        seq_indices = t.arange(seq_len//2, device=x.device)
+        x[:, seq_indices*2, :] = x[:, seq_indices*2, :] + self.pos_embed(seq_indices).unsqueeze(0)
 
         for i, block in enumerate(self.blocks):
             x = block(x)
