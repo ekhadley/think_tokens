@@ -3,6 +3,7 @@ import eindex
 import wandb
 import tqdm
 import datasets
+from typing import Callable
 
 from utils import *
 from models import Recycler, RecycleModelConfig, TrainingConfig
@@ -79,7 +80,7 @@ def test_accuracy_recycler_interleaved_embeddings(model: Recycler, dataset: data
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
         next_toks = tokens[:, s].reshape(batch_size)
-        new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, ctx[:, :s*2] if s != 0 else None)
+        new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, ctx[:, :s*2] if s != 0 else None)
         logits[:, s, :] = new_logits
         
         tok_embeds = model.embed(next_toks).reshape(batch_size, model.cfg.d_model)
@@ -108,6 +109,42 @@ def test_accuracy_recycler_attn_gate_interleaved(model: Recycler, dataset: datas
         next_tok_embeds = model.embed(toks[:, -1]).reshape(batch_size, model.cfg.d_model)
         ctx[:, s*2, :] = next_tok_embeds
         ctx[:, s*2+1, :] = new_ctx
+    
+    logprobs = t.log_softmax(logits, dim=-1)
+    logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
+    
+    top_moves = logits.argmax(dim=-1)
+    correct = (top_moves[:, :-1] == tokens[:, 1:]).float().mean().item()
+    return correct, logprob_correct
+
+@t.inference_mode()
+def test_accuracy_recycler(model: Recycler, forward_fn: Callable, dataset: datasets.Dataset) -> tuple[float, float]:
+    device = model.embed.weight.device
+    tokens = dataset['input_ids'].to(device)
+    batch_size, seq_len = tokens.shape
+
+    is_interleaved = forward_fn in [Recycler.forward_interleaved_embeddings, Recycler.forward_attn_gate_interleaved, Recycler.forward_recycler_block_interleaved]
+    needs_prev_toks = forward_fn in [Recycler.forward_attn_gate, Recycler.forward_attn_gate_interleaved]
+    is_full_context_replace = forward_fn in [Recycler.forward_full_context_replace]
+    #print(green, f"using {forward_fn.__name__}, is_interleaved: {is_interleaved}, needs_prev_toks: {needs_prev_toks}, is_full_context_replace: {is_full_context_replace}", endc)
+    
+    ctx_seq_len = 2*seq_len if is_interleaved else seq_len
+    ctx = t.zeros((batch_size, ctx_seq_len, model.cfg.d_model), device=device)
+    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
+    for s in range(seq_len):
+        next_toks = tokens[:, s].reshape(batch_size)
+        cur_toks = tokens[:, :s+1]
+        new_ctx, new_logits = forward_fn(model, cur_toks if needs_prev_toks else next_toks, ctx[:, :s*2 if is_interleaved else s] if s != 0 else None)
+
+        logits[:, s, :] = new_logits
+        if is_interleaved:
+            next_tok_embeds = model.embed(next_toks).reshape(batch_size, model.cfg.d_model)
+            ctx[:, s*2, :] = next_tok_embeds
+            ctx[:, s*2+1, :] = new_ctx
+        elif is_full_context_replace:
+            ctx = new_ctx
+        else:
+            ctx[:, s, :] = new_ctx
     
     logprobs = t.log_softmax(logits, dim=-1)
     logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
@@ -146,16 +183,16 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                 #cur_toks = tokens[:, :s+1]
                 #context = t.cat(context_parts, dim=1) if s != 0 else None
                 ##new_ctx, new_logits = model.forward_replace_embeddings(next_toks, context)
-                #new_ctx, new_logits = model.forward_attn_gate(next_toks, context)
+                #new_ctx, new_logits = model.forward_attn_gate(cur_toks, context)
                 #context_parts.append(new_ctx.unsqueeze(1))
                 #logit_parts.append(new_logits.unsqueeze(1))
 
             for s in range(seq_len): # for interleaved embedding approaches
                 next_toks = tokens[:, s].reshape(batch_size)
-                toks = tokens[:, :s+1]
+                cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
                 #new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
-                new_ctx, new_logits = model.forward_attn_gate_interleaved(toks, context)
+                new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
                 #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
@@ -170,7 +207,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
             if i % 32 == 0:
-                accuracy, _ = test_accuracy_recycler_attn_gate_interleaved(model, testset)
+                #accuracy, _ = test_accuracy_recycler_interleaved_embeddings(model, testset)
+                accuracy, _ = test_accuracy_recycler(model, Recycler.forward_attn_gate_interleaved, testset)
                 #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
             
             optimizer.step()    
