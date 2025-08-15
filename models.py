@@ -30,7 +30,7 @@ class TrainingConfig:
     eps_min: float = 0.05
 
     def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        return cfg_to_dict(self)
 
 
 @dataclass
@@ -44,7 +44,7 @@ class ModelConfig:
     seq_len: int = 512
     
     def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        return cfg_to_dict(self)
 
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: ModelConfig):
@@ -115,9 +115,7 @@ class ThinkingModelConfig:
         self.d_vocab_total = self.d_normal_vocab + self.d_thought_vocab
     
     def to_dict(self):
-        d = {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
-        d['d_vocab_total'] = self.d_vocab_total
-        return d
+        return cfg_to_dict(self)
 
 class GPT2Thinking(nn.Module):
     def __init__(self, cfg: ThinkingModelConfig):
@@ -195,7 +193,7 @@ class SplitModelConfig:
     d_thought_vocab: int = 2048
     
     def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        return cfg_to_dict(self)
 
 class GPT2SplitModel(nn.Module):
     def __init__(self, cfg: SplitModelConfig):
@@ -242,7 +240,7 @@ class RecycleModelConfig:
             self.recycle_layer = self.n_layers - 1
     
     def to_dict(self):
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        return cfg_to_dict(self)
 
 class Recycler(nn.Module):
     def __init__(self, cfg: RecycleModelConfig):

@@ -17,8 +17,8 @@ def test_accuracy_recycler_replace_embed(model: Recycler, dataset: datasets.Data
     ctx = t.zeros((batch_size, seq_len, model.cfg.d_model), device=device)
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
-        toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-        new_ctx, new_logits = model.forward_replace_embeddings(toks, ctx[:, :s] if s != 0 else None)
+        next_toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
+        new_ctx, new_logits = model.forward_replace_embeddings(next_toks, ctx[:, :s] if s != 0 else None)
         logits[:, s, :] = new_logits
         ctx[:, s, :] = new_ctx
     logprobs = t.log_softmax(logits, dim=-1)
@@ -38,8 +38,8 @@ def test_accuracy_recycler_full_context_replace(model: Recycler, dataset: datase
     ctx = None
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
-        toks = tokens[:, s].reshape(-1, 1)
-        ctx, new_logits = model.forward_full_context_replace(toks, ctx)
+        next_toks = tokens[:, s].reshape(-1, 1)
+        ctx, new_logits = model.forward_full_context_replace(next_toks, ctx)
         logits[:, s, :] = new_logits
     logprobs = t.log_softmax(logits, dim=-1)
     logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
@@ -78,11 +78,11 @@ def test_accuracy_recycler_interleaved_embeddings(model: Recycler, dataset: data
     ctx = t.zeros((batch_size, 2*seq_len, model.cfg.d_model), device=device)
     logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
     for s in range(seq_len):
-        toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
-        new_ctx, new_logits = model.forward_interleaved_embeddings(toks, ctx[:, :s*2] if s != 0 else None)
+        next_toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
+        new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, ctx[:, :s*2] if s != 0 else None)
         logits[:, s, :] = new_logits
         
-        tok_embeds = model.embed(toks).reshape(batch_size, d_model)
+        tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
         ctx[:, s*2, :] = tok_embeds # put the normal token embedding into the context
         ctx[:, s*2+1, :] = new_ctx # update the context with the new context vector
     
@@ -93,6 +93,27 @@ def test_accuracy_recycler_interleaved_embeddings(model: Recycler, dataset: data
     correct = (top_moves[:, :-1] == tokens[:, 1:]).float().mean().item()
     return correct, logprob_correct
 
+# attn gate (uses all prev and current tokens) + interleaved embeddings
+def test_accuracy_recycler_attn_gate_interleaved(model: Recycler, dataset: datasets.Dataset) -> tuple[float, float]:
+    device = model.embed.weight.device
+    tokens = dataset['input_ids'].to(device)
+    batch_size, seq_len = tokens.shape
+    
+    ctx = t.zeros((batch_size, 2*seq_len, model.cfg.d_model), device=device)
+    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
+    for s in range(seq_len):
+        toks = tokens[:, :s+1]
+        new_ctx, new_logits = model.forward_attn_gate_interleaved(toks, ctx[:, :s*2] if s != 0 else None)
+        logits[:, s, :] = new_logits
+        ctx[:, s*2, :] = new_ctx
+        ctx[:, s*2+1, :] = new_ctx
+    
+    logprobs = t.log_softmax(logits, dim=-1)
+    logprob_correct = eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean().item()
+    
+    top_moves = logits.argmax(dim=-1)
+    correct = (top_moves[:, :-1] == tokens[:, 1:]).float().mean().item()
+    return correct, logprob_correct
 
 def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, testset: datasets.Dataset, epochs: int = 5):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
@@ -131,8 +152,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             for s in range(seq_len): # for interleaved embedding approaches
                 toks = tokens[:, s].reshape(-1, 1) # (batch, 1)
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                new_ctx, new_logits = model.forward_interleaved_embeddings(toks, context)
-                #new_ctx, new_logits = model.forward_attn_gate_interleaved(toks, context)
+                #new_ctx, new_logits = model.forward_interleaved_embeddings(toks, context)
+                new_ctx, new_logits = model.forward_attn_gate_interleaved(toks, context)
                 #new_ctx, new_logits = model.forward_recycler_block_interleaved(toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
@@ -150,7 +171,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
             if i % 32 == 0:
-                accuracy, _ = test_accuracy_recycler_interleaved_embeddings(model, testset)
+                accuracy, _ = test_accuracy_recycler_attn_gate_interleaved(model, testset)
                 #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
             
             optimizer.step()    

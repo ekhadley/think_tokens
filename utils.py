@@ -2,6 +2,7 @@ import random
 import itertools
 import os
 from tqdm import trange
+import tqdm
 import torch as t
 from torch import nn
 from torch.nn import functional as F
@@ -11,6 +12,20 @@ import numpy as np
 import plotly
 import plotly.express as px
 from transformers import GPT2TokenizerFast
+
+def cfg_to_dict(cfg_obj):
+    """
+    Convert a dataclass-like config object to a dict, including dynamically
+    added attributes not declared in the dataclass fields. Excludes private
+    attributes (starting with '_') and callables.
+    """
+    # Start with declared dataclass fields (if present)
+    base = {field.name: getattr(cfg_obj, field.name) for field in getattr(cfg_obj, "__dataclass_fields__", {}).values()}
+    # Merge in any dynamically-added attributes
+    for key, value in getattr(cfg_obj, "__dict__", {}).items():
+        if key not in base and not key.startswith('_') and not callable(value):
+            base[key] = value
+    return base
 
 purple = '\x1b[38;2;255;0;255m'
 blue = '\x1b[38;2;0;0;255m'
