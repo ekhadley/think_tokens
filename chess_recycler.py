@@ -152,9 +152,9 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             for s in range(seq_len): # for interleaved embedding approaches
                 next_toks = tokens[:, s].reshape(batch_size)
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
+                #new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
                 #new_ctx, new_logits = model.forward_attn_gate_interleaved(next_toks, context)
-                #new_ctx, new_logits = model.forward_recycler_block_interleaved(toks, context)
+                new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
                 tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
@@ -163,10 +163,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
             
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
-            #loss = -eindex.eindex(logprobs[:, :-1], tokens[:, 1:], "batch seq [batch seq]").mean()
-            batch_idx = t.arange(batch_size, device=tokens.device).unsqueeze(-1)
-            step_idx = t.arange(seq_len - 1, device=tokens.device).unsqueeze(0)
-            loss = -logprobs[batch_idx, step_idx, tokens[:, 1:]].mean()
+            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
             loss.backward()
             grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
@@ -182,7 +179,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
 
 if __name__ == "__main__":
-    t.set_default_device(t.device("cuda"))
+    t.set_default_device(t.device("cpu"))
     t.manual_seed(42)
     random.seed(42)
 
@@ -199,8 +196,8 @@ if __name__ == "__main__":
     model = Recycler(model_cfg)
 
     training_cfg = TrainingConfig(
-        batch_size=13,
-        lr=1e-3,
+        batch_size=64,
+        lr=3e-3,
         weight_decay=1e-4,
     )
 
