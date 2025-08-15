@@ -340,8 +340,8 @@ class Recycler(nn.Module):
                 print(pink, self.mixing_attn.in_proj_weight[0, :10], endc)
                 print(purple, self.blocks[0].attn.in_proj_weight[0, :10], endc)
             
-            #x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
-            x = mixed_embeds[:, :context_seq_len:, :]  # (batch, token_seq_len, d_model)
+            x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
+            #x = mixed_embeds[:, :context_seq_len:, :]  # (batch, token_seq_len, d_model)
         else:
             x = token_embeds
         
