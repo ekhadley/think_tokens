@@ -10,8 +10,9 @@ from models import Recycler, RecycleModelConfig, TrainingConfig
 
 @t.inference_mode()
 def test_accuracy_recycler(model: Recycler, forward_fn: Callable, dataset: datasets.Dataset) -> tuple[float, float]:
-    device = model.embed.weight.device
-    tokens = dataset['input_ids'].to(device)
+    wandb.config.update({"forward_fn": forward_fn.__name__})
+
+    tokens = dataset['input_ids']
     batch_size, seq_len = tokens.shape
 
     wandb.config.update({"forward_fn": forward_fn.__name__})
@@ -22,8 +23,8 @@ def test_accuracy_recycler(model: Recycler, forward_fn: Callable, dataset: datas
     #print(green, f"using {forward_fn.__name__}, is_interleaved: {is_interleaved}, needs_prev_toks: {needs_prev_toks}, is_full_context_replace: {is_full_context_replace}", endc)
     
     ctx_seq_len = 2*seq_len if is_interleaved else seq_len
-    ctx = t.zeros((batch_size, ctx_seq_len, model.cfg.d_model), device=device)
-    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab), device=device)
+    ctx = t.zeros((batch_size, ctx_seq_len, model.cfg.d_model))
+    logits = t.zeros((batch_size, seq_len, model.cfg.d_vocab))
     for s in range(seq_len):
         next_toks = tokens[:, s].reshape(batch_size)
         cur_toks = tokens[:, :s+1]
@@ -52,7 +53,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     model.train()
 
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="gpt_chess", name="recycler_skinny", config=run_cfg)
+    wandb.init(project="gpt_chess", name="recycler", config=run_cfg)
 
     batch_size = cfg.batch_size
     seq_len = trainset['input_ids'].shape[1]
@@ -66,7 +67,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     accuracy = 0.0
     for epoch in range(epochs):
         for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
-            tokens = batch['input_ids'].to(model.embed.weight.device)
+            tokens = batch['input_ids']
             batch_size, seq_len = tokens.shape
 
             context_parts: list[t.Tensor] = []
@@ -84,9 +85,9 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                 next_toks = tokens[:, s].reshape(batch_size)
                 cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
+                #new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
                 #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
-                #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
                 tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
@@ -101,7 +102,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
 
             if i % 32 == 0:
                 #accuracy, _ = test_accuracy_recycler_attn_gate(model, testset)
-                accuracy, _ = test_accuracy_recycler(model, Recycler.forward_interleaved_embeddings, testset)
+                accuracy, _ = test_accuracy_recycler(model, Recycler.forward_recycler_block_interleaved, testset)
                 #t.save(model.state_dict(), f"saves/chess_normal{i}.pth")
             
             optimizer.step()    
@@ -116,14 +117,14 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 16
+    d_model = 64
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
         n_heads=4,
-        n_layers=24,
-        recycle_layer=21,
+        n_layers=4,
+        recycle_layer=3,
         d_vocab=64,
     )
     model = Recycler(model_cfg)

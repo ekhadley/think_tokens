@@ -14,6 +14,8 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: datasets.Dataset):
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
     wandb.init(project="recycler", name="normal", config=run_cfg)
 
+    grad_norm = 0.0
+
     dl = t.utils.data.DataLoader(dataset, batch_size=cfg.batch_size)
     for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
         tokens = batch['input_ids'].to(model.embed.weight.device)

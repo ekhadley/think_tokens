@@ -56,13 +56,13 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 16
+    d_model = 256
     model_cfg = ModelConfig(
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
         n_heads=4,
-        n_layers=24,
+        n_layers=8,
         d_vocab=64
     )
     model = GPT2(model_cfg)
