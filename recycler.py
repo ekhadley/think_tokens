@@ -72,14 +72,14 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 512
+    d_model = 16
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model * 4,
-        n_heads=8,
-        n_layers=12,
-        recycle_layer=9,
+        n_heads=4,
+        n_layers=2,
+        recycle_layer=1,
         d_vocab=50_257
     )
     model = Recycler(model_cfg)
