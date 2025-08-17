@@ -50,8 +50,8 @@ if __name__ == "__main__":
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=3e-4,
-        weight_decay=1e-9,
+        lr=1e-4,
+        weight_decay=1e-4,
     )
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)

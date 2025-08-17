@@ -91,15 +91,6 @@ class GPT2(nn.Module):
         x = self.ln_f(x)
         x = self.unembed(x) # untied
         return x
-    def yap(self, prompt: str, max_length: int = 50):
-        with t.no_grad():
-            tokens = t.tensor(self.tokenizer(prompt).input_ids).squeeze()
-            for _ in range(max_length):
-                logits = self(tokens).squeeze()
-                next_token = sampleLogits(logits[-1], 0.9)
-                tokens = t.cat([tokens, next_token], dim=-1)
-        return "".join(self.tokenizer.batch_decode(tokens))
-
 
 @dataclass
 class ThinkingModelConfig:
