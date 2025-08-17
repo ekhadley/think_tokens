@@ -21,7 +21,7 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
     model.train()
 
-    wandb.init(project="gpt_chess", name="normal_skinny", config=cfg)
+    wandb.init(project="recycler", name="normal_bf16", config=cfg)
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
     wandb.config.update(run_cfg)
 
@@ -59,13 +59,13 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 256
+    d_model = 64
     model_cfg = ModelConfig(
         d_model=d_model,
         seq_len=256,
         d_mlp=d_model*4,
         n_heads=4,
-        n_layers=8,
+        n_layers=4,
         d_vocab=64
     )
     model = GPT2(model_cfg)

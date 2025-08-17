@@ -54,7 +54,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     model.train()
 
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="gpt_chess", name="recycler", config=run_cfg)
+    wandb.init(project="recycler", name="recycler_bf16", config=run_cfg)
 
     batch_size = cfg.batch_size
     seq_len = trainset['input_ids'].shape[1]
@@ -99,6 +99,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                 logits = t.cat(logit_parts, dim=1)
                 logprobs = t.log_softmax(logits, dim=-1)
                 loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+
             loss.backward()
             grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
