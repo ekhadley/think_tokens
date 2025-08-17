@@ -5,6 +5,7 @@ import datasets
 
 from utils import *
 from models import GPT2, TrainingConfig, ModelConfig
+from contextlib import nullcontext
 
 def train(model: GPT2, cfg: TrainingConfig, dataset: datasets.Dataset):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
@@ -21,9 +22,10 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: datasets.Dataset):
         tokens = batch['input_ids'].to(model.embed.weight.device)
         batch_size, seq_len = tokens.shape
 
-        logits = model(tokens)
-        logprobs = t.log_softmax(logits[:, :-1], dim=-1)
-        loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+        with (t.autocast(device_type="cuda", dtype=t.bfloat16) if cfg.bf16 else nullcontext()):
+            logits = model(tokens)
+            logprobs = t.log_softmax(logits[:, :-1], dim=-1)
+            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
         loss.backward()
         grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True).item()
 
@@ -52,6 +54,7 @@ if __name__ == "__main__":
         batch_size=64,
         lr=1e-4,
         weight_decay=1e-4,
+        bf16=True,
     )
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)

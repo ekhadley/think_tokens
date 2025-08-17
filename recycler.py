@@ -7,6 +7,7 @@ from typing import Callable
 
 from utils import *
 from models import Recycler, RecycleModelConfig, TrainingConfig
+from contextlib import nullcontext
 
 
 def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
@@ -30,33 +31,34 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
         tokens = batch['input_ids'].to(model.embed.weight.device)
         batch_size, seq_len = tokens.shape
 
-        context_parts: list[t.Tensor] = []
-        logit_parts: list[t.Tensor] = []
-        #for s in range(seq_len): # this one is for non-interleaved embedding approaches
-            #next_toks = tokens[:, s].reshape(batch_size)
-            #cur_toks = tokens[:, :s+1]
-            #context = t.cat(context_parts, dim=1) if s != 0 else None
-            ##new_ctx, new_logits = model.forward_replace_embeddings(next_toks, context)
-            #new_ctx, new_logits = model.forward_attn_gate(cur_toks, context)
-            #context_parts.append(new_ctx.unsqueeze(1))
-            #logit_parts.append(new_logits.unsqueeze(1))
+        with (t.autocast(device_type="cuda", dtype=t.bfloat16) if cfg.bf16 else nullcontext()):
+            context_parts: list[t.Tensor] = []
+            logit_parts: list[t.Tensor] = []
+            #for s in range(seq_len): # this one is for non-interleaved embedding approaches
+                #next_toks = tokens[:, s].reshape(batch_size)
+                #cur_toks = tokens[:, :s+1]
+                #context = t.cat(context_parts, dim=1) if s != 0 else None
+                ##new_ctx, new_logits = model.forward_replace_embeddings(next_toks, context)
+                #new_ctx, new_logits = model.forward_attn_gate(cur_toks, context)
+                #context_parts.append(new_ctx.unsqueeze(1))
+                #logit_parts.append(new_logits.unsqueeze(1))
 
-        for s in range(seq_len): # for interleaved embedding approaches
-            next_toks = tokens[:, s].reshape(batch_size)
-            cur_toks = tokens[:, :s+1]
-            context = t.cat(context_parts, dim=1) if s > 0 else None
-            new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
-            #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
-            #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
-            logit_parts.append(new_logits.unsqueeze(1))
+            for s in range(seq_len): # for interleaved embedding approaches
+                next_toks = tokens[:, s].reshape(batch_size)
+                cur_toks = tokens[:, :s+1]
+                context = t.cat(context_parts, dim=1) if s > 0 else None
+                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
+                #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
+                #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                logit_parts.append(new_logits.unsqueeze(1))
+                
+                tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
+                context_parts.append(tok_embeds.unsqueeze(1))
+                context_parts.append(new_ctx.unsqueeze(1))
             
-            tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
-            context_parts.append(tok_embeds.unsqueeze(1))
-            context_parts.append(new_ctx.unsqueeze(1))
-        
-        logits = t.cat(logit_parts, dim=1)
-        logprobs = t.log_softmax(logits, dim=-1)
-        loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+            logits = t.cat(logit_parts, dim=1)
+            logprobs = t.log_softmax(logits, dim=-1)
+            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
         loss.backward()
         grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
@@ -88,6 +90,7 @@ if __name__ == "__main__":
         batch_size=64,
         lr=3e-3,
         weight_decay=1e-4,
+        bf16=True,
     )
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)

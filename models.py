@@ -20,6 +20,7 @@ class TrainingConfig:
     adam_beta1: float = 0.9
     adam_beta2: float = 0.95
     gamma: float = 0.95
+    bf16: bool = False
 
     think_len: int = 8
     group_size: int = 16

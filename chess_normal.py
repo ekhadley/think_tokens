@@ -5,6 +5,7 @@ import datasets
 
 from utils import *
 from models import GPT2, TrainingConfig, ModelConfig
+from contextlib import nullcontext
 
 @t.inference_mode()
 def benchmark_acc_chess(model: GPT2, dataset: datasets.Dataset) -> tuple[float, float]:
@@ -34,9 +35,11 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
         for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
             tokens = batch['input_ids']
             batch_size = tokens.shape[0]
-            logits = model(tokens)
-            logprobs = t.log_softmax(logits[:, :-1], dim=-1)
-            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
+            
+            with (t.autocast(device_type="cuda", dtype=t.bfloat16) if cfg.bf16 else nullcontext()):
+                logits = model(tokens)
+                logprobs = t.log_softmax(logits[:, :-1], dim=-1)
+                loss = -logprobs[t.arange(batch_size).unsqueeze(-1), seq_indices.unsqueeze(0), tokens[:, 1:]].mean()
 
             optimizer.zero_grad()
             loss.backward()
@@ -70,6 +73,7 @@ if __name__ == "__main__":
         lr=3e-3,
         batch_size=64,
         weight_decay=1e-6,
+        bf16=True,
     )
 
     dataset = datasets.load_dataset(f"eekay/chess-games-40moves-3min")["train"]
