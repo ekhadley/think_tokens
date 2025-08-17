@@ -51,7 +51,7 @@ if __name__ == "__main__":
     training_cfg = TrainingConfig(
         batch_size=64,
         lr=3e-4,
-        weight_decay=1e-6,
+        weight_decay=1e-9,
     )
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
