@@ -8,8 +8,6 @@ from models import GPT2, TrainingConfig, ModelConfig
 
 def train(model: GPT2, cfg: TrainingConfig, dataset: datasets.Dataset):
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
-    n_batches = len(dataset) // cfg.batch_size
-    scheduler = t.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_batches)
 
     model.train()
 
@@ -31,9 +29,8 @@ def train(model: GPT2, cfg: TrainingConfig, dataset: datasets.Dataset):
 
         optimizer.step()
         optimizer.zero_grad()
-        scheduler.step()
 
-        wandb.log({"loss": loss.item(), "grad_norm": grad_norm, "lr": scheduler.get_last_lr()[0]})
+        wandb.log({"loss": loss.item(), "grad_norm": grad_norm})
         tr.set_description(f"{magenta}loss: {loss.item():.3f}, grad_norm: {grad_norm:.3f}")
 
 if __name__ == "__main__":
