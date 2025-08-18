@@ -54,7 +54,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
     model.train()
 
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="recycler", name="recycler_bf16", config=run_cfg)
+    wandb.init(project="gpt_chess", name="recycler", config=run_cfg)
 
     batch_size = cfg.batch_size
     seq_len = trainset['input_ids'].shape[1]
@@ -83,7 +83,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                     #context_parts.append(new_ctx.unsqueeze(1))
                     #logit_parts.append(new_logits.unsqueeze(1))
 
-                for s in range(seq_len): # for interleaved embedding approaches
+                #for s in range(seq_len): # for interleaved embedding approaches
+                for s in range(8):
                     next_toks = tokens[:, s].reshape(batch_size)
                     cur_toks = tokens[:, :s+1]
                     context = t.cat(context_parts, dim=1) if s > 0 else None

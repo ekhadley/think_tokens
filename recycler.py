@@ -90,7 +90,7 @@ if __name__ == "__main__":
         batch_size=64,
         lr=3e-3,
         weight_decay=1e-4,
-        bf16=True,
+        bf16=False,
     )
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)

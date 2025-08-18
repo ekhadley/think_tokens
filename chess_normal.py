@@ -21,7 +21,7 @@ def train(model: GPT2, cfg: TrainingConfig, trainset: datasets.Dataset, testset:
     optimizer = t.optim.AdamW(model.parameters(), lr=cfg.lr, betas=(cfg.adam_beta1, cfg.adam_beta2), weight_decay=cfg.weight_decay)
     model.train()
 
-    wandb.init(project="recycler", name="normal_bf16", config=cfg)
+    wandb.init(project="gpt_chess", name="normal", config=cfg)
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
     wandb.config.update(run_cfg)
 
