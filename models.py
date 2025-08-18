@@ -350,7 +350,7 @@ class Recycler(nn.Module):
 
     # the input context is simply the embedding for token 0, recycled vector for token 0, embedding for token 1, recycled vector for token 1, etc.
     # each sequence position is now two sequence positions. 
-    def forward_interleaved_embeddings(self, next_tokens: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    def forward_interleaved_embeddings(self, next_tokens: Tensor = None, context: Tensor = None, need_distn: bool = True, emb_dropout: float = 0.0) -> tuple[Tensor, Tensor] | Tensor: 
         self.cfg.forward_type = "interleaved_embeddings"
         assert next_tokens is not None or context is not None, "Either a first token or an context state must be provided"
         if next_tokens is not None:
@@ -373,6 +373,8 @@ class Recycler(nn.Module):
         seq_len = x.shape[1]
         seq_indices = t.arange(seq_len//2, device=x.device)
         x[:, seq_indices*2, :] = x[:, seq_indices*2, :] + self.pos_embed(seq_indices).unsqueeze(0)
+        if emb_dropout > 0:
+            x[:, seq_indices*2, :] = x[:, seq_indices*2, :] * t.rand_like(x[:, seq_indices*2, :]) < emb_dropout
         
         for i, block in enumerate(self.blocks):
             x = block(x)
@@ -457,9 +459,9 @@ class Recycler(nn.Module):
 
     # a different direction.
     # The idea is that we give the model the string of previous tokens.
-    # it produces a rollout of some length of continuous context vectors, without providing it new tokens or asking it to produce prediction distributions.
+    # It produces a rollout of some length of continuous context vectors, without providing new tokens or asking it to produce prediction distributions.
     # We continuously append these vectors like normal.
-    # After a set number we take it's prediction.
+    # After a set number we take it's prediction. Then we backprop through time through the continuous context vectors that were created.
     # takes as input just a continuous context vector, including normal token embeddings and current/past recycled vectors.
     # there are various schemes for encoding the context (including prev rollouts for every token or not, etc.) So that all takes place outside this function
     def forward_rollout_replace_embed(self, input: Tensor, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 

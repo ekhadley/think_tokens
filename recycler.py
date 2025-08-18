@@ -88,7 +88,7 @@ if __name__ == "__main__":
     model = Recycler(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=3e-3,
+        lr=3e-4,
         weight_decay=1e-3,
         bf16=True,
     )
