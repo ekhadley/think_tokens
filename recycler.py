@@ -27,7 +27,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
     grad_norm = 0
 
     dl = t.utils.data.DataLoader(trainset, batch_size=cfg.batch_size)
-    for i, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
+    for b, batch in enumerate((tr:=tqdm.tqdm(dl, ncols=100))):
         tokens = batch['input_ids'].to(model.embed.weight.device)
         batch_size, seq_len = tokens.shape
 
@@ -47,14 +47,35 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 next_toks = tokens[:, s].reshape(batch_size)
                 cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context)
+                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.5)
                 #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
                 #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
-                tok_embeds = model.embed(next_toks).reshape(batch_size, d_model)
+                tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
                 context_parts.append(tok_embeds.unsqueeze(1))
                 context_parts.append(new_ctx.unsqueeze(1))
+            
+            if b%32 == 0:
+                context_parts = []
+                logit_parts = []
+                for s in range(seq_len): # for interleaved embedding approaches
+                    next_toks = tokens[:, s].reshape(batch_size)
+                    cur_toks = tokens[:, :s+1]
+                    context = t.cat(context_parts, dim=1) if s > 0 else None
+                    new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
+                    #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
+                    #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                    logit_parts.append(new_logits.unsqueeze(1))
+                    
+                    tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
+                    context_parts.append(tok_embeds.unsqueeze(1))
+                    context_parts.append(new_ctx.unsqueeze(1))
+
+                # calculate test loss w/o dropout
+                logits = t.cat(logit_parts, dim=1)
+                logprobs = t.log_softmax(logits, dim=-1)
+                loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
             
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
@@ -65,7 +86,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
         optimizer.step()    
         optimizer.zero_grad()
 
-        wandb.log({"loss": loss.item(), "grad_norm": grad_norm})
+        wandb.log({"train_loss": loss.item(), "grad_norm": grad_norm, "loss": loss.item()})
         tr.set_description(f"{magenta}loss: {loss.item():.3f}, grad_norm: {grad_norm:.3f}")
 
 
@@ -75,7 +96,7 @@ if __name__ == "__main__":
     random.seed(42)
 
     seq_len = 64
-    d_model = 256
+    d_model = 8
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=seq_len,
@@ -87,7 +108,7 @@ if __name__ == "__main__":
     )
     model = Recycler(model_cfg)
     training_cfg = TrainingConfig(
-        batch_size=64,
+        batch_size=4,
         lr=3e-4,
         weight_decay=1e-3,
         bf16=True,

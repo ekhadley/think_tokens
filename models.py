@@ -369,13 +369,12 @@ class Recycler(nn.Module):
             x = context
         else:
             raise ValueError("Either token or context must be provided")
-
-        seq_len = x.shape[1]
-        seq_indices = t.arange(seq_len//2, device=x.device)
-        x[:, seq_indices*2, :] = x[:, seq_indices*2, :] + self.pos_embed(seq_indices).unsqueeze(0)
-        if emb_dropout > 0:
-            x[:, seq_indices*2, :] = x[:, seq_indices*2, :] * t.rand_like(x[:, seq_indices*2, :]) < emb_dropout
         
+        batch_size, seq_len, _ = x.shape
+        if emb_dropout > 0 and seq_len > 1 and self.training:
+            tok_embed_indices = t.arange(0, seq_len, 2) # the indices of the real token embeddings (not recycled)
+            mask = t.rand(batch_size, len(tok_embed_indices), requires_grad=False) > emb_dropout
+
         for i, block in enumerate(self.blocks):
             x = block(x)
             if i == self.cfg.recycle_layer:
@@ -440,10 +439,6 @@ class Recycler(nn.Module):
             x = context
         else:
             raise ValueError("Either token or context must be provided")
-
-        seq_len = x.shape[1]
-        seq_indices = t.arange(seq_len//2, device=x.device)
-        x[:, seq_indices*2, :] = x[:, seq_indices*2, :] + self.pos_embed(seq_indices).unsqueeze(0)
 
         for i, block in enumerate(self.blocks):
             x = block(x)
