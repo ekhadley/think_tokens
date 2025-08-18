@@ -47,12 +47,12 @@ endc = '\033[0m'
 t.backends.cuda.enable_flash_sdp(enabled=True)
 t.set_printoptions(sci_mode=False, linewidth=200, edgeitems=4)
 
-def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, cfg, dataset_title, dataset_name, save_name: str, fraction: float = 1.0, pad=False):
+def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, min_seq_len: int, dataset_title: str, dataset_name: str, save_name: str, fraction: float = 1.0, pad=False):
     dataset = datasets.load_dataset(dataset_title, name=dataset_name, split="train").train_test_split(fraction)['test']
     if pad:
-        dataset = dataset.map(lambda x: tokenizer(x['text'], padding='max_length', truncation=True, max_length=cfg.seq_len))
+        dataset = dataset.map(lambda x: tokenizer(x['text'], padding='max_length', truncation=True, max_length=min_seq_len))
     else:
-        dataset = dataset.map(lambda x: tokenizer(x['text'], truncation=True, max_length=cfg.seq_len)).filter(lambda x: len(x['input_ids']) >= cfg.seq_len)
+        dataset = dataset.map(lambda x: tokenizer(x['text'], truncation=True, max_length=min_seq_len)).filter(lambda x: len(x['input_ids']) >= min_seq_len)
     dataset.set_format(type='torch')
     dataset.save_to_disk(f"datasets/{save_name}")
     return dataset

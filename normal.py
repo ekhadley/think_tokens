@@ -40,10 +40,11 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
+    seq_len = 64
     d_model = 512
     model_cfg = ModelConfig(
         d_model=d_model,
-        seq_len=256,
+        seq_len=seq_len,
         d_mlp=d_model * 4,
         n_heads=8,
         n_layers=12,
@@ -57,7 +58,7 @@ if __name__ == "__main__":
         bf16=True,
     )
 
-    #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
-    dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
+    #dataset = tokenizeAndSaveDataset(model.tokenizer, seq_len, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-{seq_len}", 0.07, pad=False)
+    dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-{seq_len}")
     
     train(model, training_cfg, dataset)

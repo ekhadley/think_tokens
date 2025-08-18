@@ -43,8 +43,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 #context_parts.append(new_ctx.unsqueeze(1))
                 #logit_parts.append(new_logits.unsqueeze(1))
 
-            #for s in range(seq_len): # for interleaved embedding approaches
-            for s in range(8):
+            for s in range(seq_len): # for interleaved embedding approaches
                 next_toks = tokens[:, s].reshape(batch_size)
                 cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
@@ -75,14 +74,15 @@ if __name__ == "__main__":
     t.manual_seed(42)
     random.seed(42)
 
-    d_model = 16
+    seq_len = 64
+    d_model = 512
     model_cfg = RecycleModelConfig(
         d_model=d_model,
-        seq_len=256,
+        seq_len=seq_len,
         d_mlp=d_model * 4,
-        n_heads=4,
-        n_layers=2,
-        recycle_layer=1,
+        n_heads=8,
+        n_layers=12,
+        recycle_layer=10,
         d_vocab=50_257
     )
     model = Recycler(model_cfg)
@@ -94,7 +94,7 @@ if __name__ == "__main__":
         bf16=False,
     )
 
-    #dataset = tokenizeAndSaveDataset(model.tokenizer, model_cfg, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-512", 0.07, pad=False)
-    dataset = loadTokenizedDataset("fineweb-edu-tokenized-256")
+    #dataset = tokenizeAndSaveDataset(model.tokenizer, seq_len, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-{seq_len}", 0.07, pad=False)
+    dataset = loadTokenizedDataset(f"fineweb-edu-tokenized-{seq_len}")
     
     train(model, training_cfg, dataset)
