@@ -75,23 +75,22 @@ if __name__ == "__main__":
     random.seed(42)
 
     seq_len = 64
-    d_model = 512
+    d_model = 256
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=seq_len,
         d_mlp=d_model * 4,
         n_heads=8,
-        n_layers=12,
-        recycle_layer=10,
+        n_layers=10,
+        recycle_layer=8,
         d_vocab=50_257
     )
     model = Recycler(model_cfg)
-
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=3e-3,
-        weight_decay=1e-4,
-        bf16=False,
+        lr=1e-4,
+        weight_decay=1e-6,
+        bf16=True,
     )
 
     #dataset = tokenizeAndSaveDataset(model.tokenizer, seq_len, "HuggingFaceFW/fineweb-edu", "sample-10BT", f"fineweb-edu-tokenized-{seq_len}", 0.07, pad=False)

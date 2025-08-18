@@ -41,20 +41,21 @@ if __name__ == "__main__":
     random.seed(42)
 
     seq_len = 64
-    d_model = 512
+    d_model = 256
     model_cfg = ModelConfig(
         d_model=d_model,
         seq_len=seq_len,
         d_mlp=d_model * 4,
         n_heads=8,
-        n_layers=12,
+        n_layers=10,
         d_vocab=50_257
     )
+
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
         lr=1e-4,
-        weight_decay=1e-4,
+        weight_decay=1e-6,
         bf16=True,
     )
 
