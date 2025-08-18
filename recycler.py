@@ -96,7 +96,7 @@ if __name__ == "__main__":
     random.seed(42)
 
     seq_len = 64
-    d_model = 8
+    d_model = 256
     model_cfg = RecycleModelConfig(
         d_model=d_model,
         seq_len=seq_len,
