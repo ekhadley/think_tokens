@@ -57,6 +57,16 @@ def tokenizeAndSaveDataset(tokenizer: GPT2TokenizerFast, min_seq_len: int, datas
     dataset.save_to_disk(f"datasets/{save_name}")
     return dataset
 
+def tokenizeAndSaveLocalDataset(tokenizer: GPT2TokenizerFast, min_seq_len: int, dataset_path: str, save_name: str, pad=False):
+    dataset = datasets.load_from_disk(dataset_path)
+    if pad:
+        dataset = dataset.map(lambda x: tokenizer(x['text'], padding='max_length', truncation=True, max_length=min_seq_len))
+    else:
+        dataset = dataset.map(lambda x: tokenizer(x['text'], truncation=True, max_length=min_seq_len)).filter(lambda x: len(x['input_ids']) >= min_seq_len)
+    dataset.set_format(type='torch')
+    dataset.save_to_disk(f"datasets/{save_name}")
+    return dataset
+
 def loadModel(model_path: str, model_class, cfg):
     model = model_class(cfg)
     model.load_state_dict(t.load(model_path, weights_only=True))
