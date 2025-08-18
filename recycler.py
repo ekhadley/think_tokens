@@ -75,19 +75,19 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 # calculate test loss w/o dropout
                 logits = t.cat(logit_parts, dim=1)
                 logprobs = t.log_softmax(logits, dim=-1)
-                loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+                test_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
             
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
-            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
-        loss.backward()
+            train_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+        train_loss.backward()
         grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
 
         optimizer.step()    
         optimizer.zero_grad()
 
-        wandb.log({"train_loss": loss.item(), "grad_norm": grad_norm, "loss": loss.item()})
-        tr.set_description(f"{magenta}loss: {loss.item():.3f}, grad_norm: {grad_norm:.3f}")
+        wandb.log({"train_loss": train_loss.item(), "grad_norm": grad_norm, "loss": test_loss.item()})
+        tr.set_description(f"{magenta}train loss: {train_loss.item():.3f}, grad_norm: {grad_norm:.3f}, test loss: {test_loss.item():.3f}")
 
 
 if __name__ == "__main__":
