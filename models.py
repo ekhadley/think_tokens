@@ -410,7 +410,7 @@ class Recycler(nn.Module):
             x = block(x)
             if i == self.cfg.recycle_layer - 1:
                 recycler_stream = self.recycler_block(x)
-                new_context = recycler_stream[:, -1, :]  # Use the separate recycler block's residual stream
+                new_context = recycler_stream[:, -1, :]
                 if not need_distn:
                     return new_context
 
@@ -447,8 +447,31 @@ class Recycler(nn.Module):
             x = block(x)
             if i == self.cfg.recycle_layer - 1:
                 recycler_stream = self.recycler_block(x)
-                #new_context = recycler_stream[:, -1, :]
-                new_context = recycler_stream[:, -1, :] - x[:, -1, :]
+                new_context = recycler_stream[:, -1, :]
+                if not need_distn:
+                    return new_context
+
+        x = self.ln_f(x[:, -1, :])
+        distn = self.unembed(x)
+        return new_context, distn
+
+    # a different direction.
+    # The idea is that we give the model the string of previous tokens.
+    # it produces a rollout of some length of continuous context vectors, without providing it new tokens or asking it to produce prediction distributions.
+    # We continuously append these vectors like normal.
+    # After a set number we take it's prediction.
+    # takes as input just a continuous context vector, including normal token embeddings and current/past recycled vectors.
+    # there are various schemes for encoding the context (including prev rollouts for every token or not, etc.) So that all takes place outside this function
+    def forward_rollout_replace_embed(self, input: Tensor, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "recycler_rollout_replace_embed"
+        assert input.ndim == 3, "Input should be (batch, seq_len, d_model)"
+
+        x = input
+
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            if i == self.cfg.recycle_layer - 1:
+                new_context = x[:, -1, :]
                 if not need_distn:
                     return new_context
 

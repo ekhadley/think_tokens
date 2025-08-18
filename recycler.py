@@ -38,7 +38,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 #next_toks = tokens[:, s].reshape(batch_size)
                 #cur_toks = tokens[:, :s+1]
                 #context = t.cat(context_parts, dim=1) if s != 0 else None
-                ##new_ctx, new_logits = model.forward_replace_embeddings(next_toks, context)
+                ##new_ctx, new_logits = model.forward_replace_embed(next_toks, context)
                 #new_ctx, new_logits = model.forward_attn_gate(cur_toks, context)
                 #context_parts.append(new_ctx.unsqueeze(1))
                 #logit_parts.append(new_logits.unsqueeze(1))
@@ -81,15 +81,15 @@ if __name__ == "__main__":
         seq_len=seq_len,
         d_mlp=d_model * 4,
         n_heads=8,
-        n_layers=10,
-        recycle_layer=8,
+        n_layers=8,
+        recycle_layer=6,
         d_vocab=50_257
     )
     model = Recycler(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=1e-4,
-        weight_decay=1e-6,
+        lr=3e-3,
+        weight_decay=1e-3,
         bf16=True,
     )
 

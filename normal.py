@@ -47,15 +47,15 @@ if __name__ == "__main__":
         seq_len=seq_len,
         d_mlp=d_model * 4,
         n_heads=8,
-        n_layers=10,
+        n_layers=8,
         d_vocab=50_257
     )
 
     model = GPT2(model_cfg)
     training_cfg = TrainingConfig(
         batch_size=64,
-        lr=1e-4,
-        weight_decay=1e-6,
+        lr=3e-4,
+        weight_decay=1e-3,
         bf16=True,
     )
 
