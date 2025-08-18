@@ -83,8 +83,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset, test
                     #context_parts.append(new_ctx.unsqueeze(1))
                     #logit_parts.append(new_logits.unsqueeze(1))
 
-                #for s in range(seq_len): # for interleaved embedding approaches
-                for s in range(8):
+                for s in range(seq_len): # for interleaved embedding approaches
                     next_toks = tokens[:, s].reshape(batch_size)
                     cur_toks = tokens[:, :s+1]
                     context = t.cat(context_parts, dim=1) if s > 0 else None
