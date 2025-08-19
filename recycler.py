@@ -57,25 +57,26 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 context_parts.append(new_ctx.unsqueeze(1))
             
             if b%32 == 0:
-                context_parts = []
-                logit_parts = []
-                for s in range(seq_len): # for interleaved embedding approaches
-                    next_toks = tokens[:, s].reshape(batch_size)
-                    cur_toks = tokens[:, :s+1]
-                    context = t.cat(context_parts, dim=1) if s > 0 else None
-                    new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
-                    #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
-                    #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
-                    logit_parts.append(new_logits.unsqueeze(1))
-                    
-                    tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
-                    context_parts.append(tok_embeds.unsqueeze(1))
-                    context_parts.append(new_ctx.unsqueeze(1))
+                with t.inference_mode():
+                    context_parts = []
+                    logit_parts = []
+                    for s in range(seq_len): # for interleaved embedding approaches
+                        next_toks = tokens[:, s].reshape(batch_size)
+                        cur_toks = tokens[:, :s+1]
+                        context = t.cat(context_parts, dim=1) if s > 0 else None
+                        new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
+                        #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
+                        #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                        logit_parts.append(new_logits.unsqueeze(1))
+                        
+                        tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
+                        context_parts.append(tok_embeds.unsqueeze(1))
+                        context_parts.append(new_ctx.unsqueeze(1))
 
-                # calculate test loss w/o dropout
-                logits = t.cat(logit_parts, dim=1)
-                logprobs = t.log_softmax(logits, dim=-1)
-                test_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+                    # calculate test loss w/o dropout
+                    logits = t.cat(logit_parts, dim=1)
+                    logprobs = t.log_softmax(logits, dim=-1)
+                    test_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
             
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
