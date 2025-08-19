@@ -380,7 +380,7 @@ class Recycler(nn.Module):
         return new_context, distn
 
     # like attn_gate_interleaved but with a separate, alternative recycler block at recycle_layer whose output we actually recycle.
-    def forward_recycler_block_interleaved(self, next_tokens: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+    def forward_recycler_block_interleaved(self, next_tokens: Tensor = None, context: Tensor = None, need_distn: bool = True, emb_dropout: float = 0.0) -> tuple[Tensor, Tensor] | Tensor: 
         self.cfg.forward_type = "recycler_block_interleaved"
         assert next_tokens is not None or context is not None, "Either a first token or an context state must be provided"
         if next_tokens is not None:
@@ -399,6 +399,12 @@ class Recycler(nn.Module):
             x = context
         else:
             raise ValueError("Either token or context must be provided")
+
+        batch_size, seq_len, _ = x.shape
+        if emb_dropout > 0 and seq_len > 1 and self.training:
+            tok_embed_indices = t.arange(0, seq_len, 2) # the indices of the real token embeddings (not recycled)
+            mask = t.rand(batch_size, len(tok_embed_indices)) > emb_dropout
+            x[:, tok_embed_indices, :] = x[:, tok_embed_indices, :] * mask.unsqueeze(-1)
 
         for i, block in enumerate(self.blocks):
             x = block(x)

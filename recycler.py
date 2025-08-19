@@ -46,8 +46,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
             for s in range(seq_len): # for interleaved embedding approaches
                 next_toks = tokens[:, s].reshape(batch_size)
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
-                #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                #new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
+                new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context, emb_dropout=0.5)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
                 tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
@@ -73,8 +73,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 for s in range(seq_len): # for interleaved embedding approaches
                     next_toks = tokens[:, s].reshape(batch_size)
                     context = t.cat(context_parts, dim=1) if s > 0 else None
-                    new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
-                    #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                    #new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
+                    new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context, emb_dropout=0.5)
                     logit_parts.append(new_logits.unsqueeze(1))
                     
                     tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
@@ -102,7 +102,7 @@ if __name__ == "__main__":
         d_mlp=d_model * 4,
         n_heads=8,
         n_layers=8,
-        recycle_layer=7,
+        recycle_layer=6,
         d_vocab=50_257
     )
     model = Recycler(model_cfg)
