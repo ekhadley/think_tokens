@@ -56,8 +56,6 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 context_parts.append(tok_embeds.unsqueeze(1))
                 context_parts.append(new_ctx.unsqueeze(1))
             
-
-            
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
             train_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
