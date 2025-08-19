@@ -425,18 +425,16 @@ class Recycler(nn.Module):
     # After a set number we take it's prediction. Then we backprop through time through the continuous context vectors that were created.
     # takes as input just a continuous context vector, including normal token embeddings and current/past recycled vectors.
     # there are various schemes for encoding the context (including prev rollouts for every token or not, etc.) So that all takes place outside this function
-    def forward_rollout_replace_embed(self, input: Tensor, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
-        self.cfg.forward_type = "recycler_rollout_replace_embed"
-        assert input.ndim == 3, "Input should be (batch, seq_len, d_model)"
-
-        x = input
+    def forward_rollout_replace_embed_interleaved(self, x: Tensor, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
+        self.cfg.forward_type = "recycler_rollout_replace_embed_interleaved"
+        assert x.ndim == 3, "Input should be (batch, seq_len, d_model)"
 
         for i, block in enumerate(self.blocks):
             x = block(x)
             if i == self.cfg.recycle_layer - 1:
                 new_context = x[:, -1, :]
                 if not need_distn:
-                    return new_context
+                    return new_context, None
 
         x = self.ln_f(x[:, -1, :])
         distn = self.unembed(x)
