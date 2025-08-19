@@ -56,7 +56,19 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 context_parts.append(tok_embeds.unsqueeze(1))
                 context_parts.append(new_ctx.unsqueeze(1))
             
-            if b%32 == 0:
+
+            
+            logits = t.cat(logit_parts, dim=1)
+            logprobs = t.log_softmax(logits, dim=-1)
+            train_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+        train_loss.backward()
+        grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
+
+        optimizer.step()    
+        optimizer.zero_grad()
+
+        if b%32 == 0:
+            with (t.autocast(device_type="cuda", dtype=t.bfloat16) if cfg.bf16 else nullcontext()):
                 with t.inference_mode():
                     context_parts = []
                     logit_parts = []
@@ -77,15 +89,6 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                     logits = t.cat(logit_parts, dim=1)
                     logprobs = t.log_softmax(logits, dim=-1)
                     test_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
-            
-            logits = t.cat(logit_parts, dim=1)
-            logprobs = t.log_softmax(logits, dim=-1)
-            train_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
-        train_loss.backward()
-        grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
-
-        optimizer.step()    
-        optimizer.zero_grad()
 
         wandb.log({"train_loss": train_loss.item(), "grad_norm": grad_norm, "loss": test_loss.item()})
         tr.set_description(f"{magenta}train loss: {train_loss.item():.3f}, grad_norm: {grad_norm:.3f}, test loss: {test_loss.item():.3f}")
