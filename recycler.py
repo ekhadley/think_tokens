@@ -56,17 +56,37 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
             
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
-            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+            train_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
 
-        loss.backward()
+        train_loss.backward()
         
         grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
         optimizer.step()    
         optimizer.zero_grad()
 
+        if b % 32 == 0:
+            with t.inference_mode():
+                model.eval()
 
-        wandb.log({"loss": loss.item(), "grad_norm": grad_norm})
-        tr.set_description(f"{magenta}loss: {loss.item():.3f}, grad_norm: {grad_norm:.3f}")
+                context_parts: list[t.Tensor] = []
+                logit_parts: list[t.Tensor] = []
+                for s in range(seq_len): # for interleaved embedding approaches
+                    next_toks = tokens[:, s].reshape(batch_size)
+                    context = t.cat(context_parts, dim=1) if s > 0 else None
+                    new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
+                    #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
+                    logit_parts.append(new_logits.unsqueeze(1))
+                    
+                    tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
+                    context_parts.append(tok_embeds.unsqueeze(1))
+                    context_parts.append(new_ctx.unsqueeze(1))
+                
+                logits = t.cat(logit_parts, dim=1)
+                logprobs = t.log_softmax(logits, dim=-1)
+                test_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+
+        wandb.log({"test_loss": test_loss.item(), "train_loss": train_loss.item(), "grad_norm": grad_norm.item()})
+        tr.set_description(f"{magenta}train_loss: {train_loss.item():.3f}, test_loss: {test_loss.item():.3f}, grad_norm: {grad_norm.item():.3f}")
 
 
 if __name__ == "__main__":
