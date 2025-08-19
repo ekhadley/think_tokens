@@ -326,14 +326,8 @@ class Recycler(nn.Module):
             combined = t.cat([context, token_embeds], dim=1)  # (batch, total_seq_len, d_model)
             total_seq_len = combined.shape[1]
             attn_mask = t.triu(t.ones((total_seq_len, total_seq_len), device=combined.device, dtype=t.bool), diagonal=1)
-            mixed_embeds, weights = self.mixing_attn(combined, combined, combined, is_causal=True, attn_mask=attn_mask, need_weights=show_pattern)
-            if show_pattern:
-                imshow(weights[0])
-                print(pink, self.mixing_attn.in_proj_weight[0, :10], endc)
-                print(purple, self.blocks[0].attn.in_proj_weight[0, :10], endc)
-            
+            mixed_embeds, _ = self.mixing_attn(combined, combined, combined, is_causal=True, attn_mask=attn_mask, need_weights=False)
             x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
-            #x = mixed_embeds[:, :context_seq_len:, :]  # (batch, token_seq_len, d_model)
         else:
             x = token_embeds
         
@@ -399,9 +393,7 @@ class Recycler(nn.Module):
             if context.ndim == 2: context = context.unsqueeze(0)
             assert context.ndim == 3, "Context should be (batch, seq, d_model)"
             context_seq_len = context.shape[1]
-            #print(red, context.shape, blue, token_embeds.shape, endc)
             combined = t.cat([context, token_embeds], dim=1)  # (batch, total_seq_len, d_model)
-            #print(green, combined.shape, endc)
             total_seq_len = combined.shape[1]
             attn_mask = t.triu(t.ones((total_seq_len, total_seq_len), device=combined.device, dtype=t.bool), diagonal=1)
             mixed_embeds, _ = self.mixing_attn(combined, combined, combined, is_causal=True, attn_mask=attn_mask)

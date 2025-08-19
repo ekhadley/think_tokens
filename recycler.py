@@ -16,7 +16,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
     model.train()
 
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="recycler", name="recycler", config=run_cfg)
+    wandb.init(project="recycler", name="abc-test", config=run_cfg)
 
     batch_size = cfg.batch_size
     seq_len = trainset['input_ids'].shape[1]
@@ -45,10 +45,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
 
             for s in range(seq_len): # for interleaved embedding approaches
                 next_toks = tokens[:, s].reshape(batch_size)
-                cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
                 new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
-                #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
                 #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
                 
@@ -58,38 +56,17 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
             
             logits = t.cat(logit_parts, dim=1)
             logprobs = t.log_softmax(logits, dim=-1)
-            train_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
+            loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
 
-        train_loss.backward()
+        loss.backward()
         
         grad_norm = t.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0, error_if_nonfinite=True)
         optimizer.step()    
         optimizer.zero_grad()
 
-        if b%32 == 0:
-            with t.inference_mode():
-                context_parts = []
-                logit_parts = []
-                for s in range(seq_len): # for interleaved embedding approaches
-                    next_toks = tokens[:, s].reshape(batch_size)
-                    cur_toks = tokens[:, :s+1]
-                    context = t.cat(context_parts, dim=1) if s > 0 else None
-                    new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
-                    #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
-                    #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
-                    logit_parts.append(new_logits.unsqueeze(1))
-                    
-                    tok_embeds = (model.embed(next_toks) + model.pos_embed.weight[s]).reshape(batch_size, d_model)
-                    context_parts.append(tok_embeds.unsqueeze(1))
-                    context_parts.append(new_ctx.unsqueeze(1))
 
-                # calculate test loss w/o dropout
-                logits = t.cat(logit_parts, dim=1)
-                logprobs = t.log_softmax(logits, dim=-1)
-                test_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
-
-        wandb.log({"train_loss": train_loss.item(), "grad_norm": grad_norm, "loss": test_loss.item()})
-        tr.set_description(f"{magenta}train loss: {train_loss.item():.3f}, grad_norm: {grad_norm:.3f}, test loss: {test_loss.item():.3f}")
+        wandb.log({"loss": loss.item(), "grad_norm": grad_norm})
+        tr.set_description(f"{magenta}loss: {loss.item():.3f}, grad_norm: {grad_norm:.3f}")
 
 
 if __name__ == "__main__":
@@ -105,14 +82,14 @@ if __name__ == "__main__":
         d_mlp=d_model * 4,
         n_heads=8,
         n_layers=8,
-        recycle_layer=6,
+        recycle_layer=7,
         d_vocab=50_257
     )
     model = Recycler(model_cfg)
     training_cfg = TrainingConfig(
-        batch_size=4,
+        batch_size=64,
         lr=3e-4,
-        weight_decay=1e-3,
+        weight_decay=1e-9,
         bf16=True,
     )
 
