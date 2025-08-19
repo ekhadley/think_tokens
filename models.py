@@ -364,7 +364,6 @@ class Recycler(nn.Module):
         else:
             raise ValueError("Either token or context must be provided")
         
-        
         batch_size, seq_len, _ = x.shape
         if emb_dropout > 0 and seq_len > 1 and self.training:
             tok_embed_indices = t.arange(0, seq_len, 2) # the indices of the real token embeddings (not recycled)
@@ -380,39 +379,6 @@ class Recycler(nn.Module):
         distn = self.unembed(x) # unembed the last position residual stream to get next token distn
         return new_context, distn
 
-    # like attn_gate but with interleaved embeddings.
-    def forward_attn_gate_interleaved(self, tokens: Tensor, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
-        self.cfg.forward_type = "attn_gate_interleaved"
-        assert tokens.ndim == 2, "Tokens should be (batch, seq_len)"
-
-        token_seq_len = tokens.shape[1]
-        token_embeds = self.embed(tokens)  # (batch, token_seq_len, d_model)
-        token_embeds = token_embeds + self.pos_embed(t.arange(token_seq_len, device=token_embeds.device)).unsqueeze(0)
-
-        if context is not None:
-            if context.ndim == 2: context = context.unsqueeze(0)
-            assert context.ndim == 3, "Context should be (batch, seq, d_model)"
-            context_seq_len = context.shape[1]
-            combined = t.cat([context, token_embeds], dim=1)  # (batch, total_seq_len, d_model)
-            total_seq_len = combined.shape[1]
-            attn_mask = t.triu(t.ones((total_seq_len, total_seq_len), device=combined.device, dtype=t.bool), diagonal=1)
-            mixed_embeds, _ = self.mixing_attn(combined, combined, combined, is_causal=True, attn_mask=attn_mask)
-            x = mixed_embeds[:, context_seq_len:, :]  # (batch, token_seq_len, d_model)
-        else:
-            x = token_embeds
-
-        for i, block in enumerate(self.blocks):
-            x = block(x)
-            if i == self.cfg.recycle_layer - 1:
-                recycler_stream = self.recycler_block(x)
-                new_context = recycler_stream[:, -1, :]
-                if not need_distn:
-                    return new_context
-
-        x = self.ln_f(x[:, -1, :])  # Only process the last position for logits
-        distn = self.unembed(x)
-        return new_context, distn
-    
     # like attn_gate_interleaved but with a separate, alternative recycler block at recycle_layer whose output we actually recycle.
     def forward_recycler_block_interleaved(self, next_tokens: Tensor = None, context: Tensor = None, need_distn: bool = True) -> tuple[Tensor, Tensor] | Tensor: 
         self.cfg.forward_type = "recycler_block_interleaved"

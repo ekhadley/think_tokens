@@ -16,7 +16,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
     model.train()
 
     run_cfg = {"model": model.cfg.to_dict(), "training": cfg.to_dict()}
-    wandb.init(project="recycler", name="abc-test", config=run_cfg)
+    wandb.init(project="recycler", name="recycler", config=run_cfg)
 
     batch_size = cfg.batch_size
     seq_len = trainset['input_ids'].shape[1]
@@ -85,8 +85,8 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 logprobs = t.log_softmax(logits, dim=-1)
                 test_loss = -logprobs[t.arange(batch_size).unsqueeze(-1), t.arange(seq_len - 1).unsqueeze(0), tokens[:, 1:]].mean()
 
-        wandb.log({"test_loss": test_loss.item(), "train_loss": train_loss.item(), "grad_norm": grad_norm.item()})
-        tr.set_description(f"{magenta}train_loss: {train_loss.item():.3f}, test_loss: {test_loss.item():.3f}, grad_norm: {grad_norm.item():.3f}")
+        wandb.log({"loss": test_loss.item(), "train_loss": train_loss.item(), "grad_norm": grad_norm.item()})
+        tr.set_description(f"{magenta}train loss: {train_loss.item():.3f}, test loss: {test_loss.item():.3f}, grad norm: {grad_norm.item():.3f}")
 
 
 if __name__ == "__main__":
