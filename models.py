@@ -370,10 +370,11 @@ class Recycler(nn.Module):
         else:
             raise ValueError("Either token or context must be provided")
         
+        
         batch_size, seq_len, _ = x.shape
         if emb_dropout > 0 and seq_len > 1 and self.training:
             tok_embed_indices = t.arange(0, seq_len, 2) # the indices of the real token embeddings (not recycled)
-            mask = t.rand(batch_size, len(tok_embed_indices), requires_grad=False) > emb_dropout
+            mask = t.rand(batch_size, len(tok_embed_indices)) > emb_dropout
             x[:, tok_embed_indices, :] = x[:, tok_embed_indices, :] * mask.unsqueeze(-1)
 
         for i, block in enumerate(self.blocks):
