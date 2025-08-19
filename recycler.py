@@ -47,7 +47,7 @@ def train(model: Recycler, cfg: TrainingConfig, trainset: datasets.Dataset):
                 next_toks = tokens[:, s].reshape(batch_size)
                 cur_toks = tokens[:, :s+1]
                 context = t.cat(context_parts, dim=1) if s > 0 else None
-                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.5)
+                new_ctx, new_logits = model.forward_interleaved_embeddings(next_toks, context, emb_dropout=0.0)
                 #new_ctx, new_logits = model.forward_attn_gate_interleaved(cur_toks, context)
                 #new_ctx, new_logits = model.forward_recycler_block_interleaved(next_toks, context)
                 logit_parts.append(new_logits.unsqueeze(1))
